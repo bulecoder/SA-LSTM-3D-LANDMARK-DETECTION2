@@ -25,29 +25,59 @@ from scipy.ndimage import zoom
 import MyUtils
 import torch.nn.functional as F
 
-def analysis_result(landmarkNum, Off):
-    SDR = np.zeros((landmarkNum, 8))
+def analysis_result(landmarkNum, Off): 
+    thresholds = [1, 2, 3, 4, 5, 6, 7, 8]
+    SDR = np.zeros((landmarkNum, len(thresholds)))
     SD = np.zeros((landmarkNum))
+    
+    # 1. 计算 MRE (Mean Radial Error)
     MRE = np.mean(Off, axis=0)
 
+    # 2. 计算 SDR 和 SD
     for landmarkId in range(landmarkNum):
         landmarkCol = Off[:, landmarkId]
-        # print (np.max(landmarkCol))
-        test_coarse_mm = np.array([landmarkCol[landmarkCol <= 1].size,
-                                   landmarkCol[landmarkCol <= 2].size,
-                                   landmarkCol[landmarkCol <= 3].size,
-                                   landmarkCol[landmarkCol <= 4].size,
-                                   landmarkCol[landmarkCol <= 5].size,
-                                   landmarkCol[landmarkCol <= 6].size,
-                                   landmarkCol[landmarkCol <= 7].size,
-                                   # landmarkCol[landmarkCol <= 8].size,
-                                   # landmarkCol[landmarkCol <= 4].size,
-                                   landmarkCol[landmarkCol <= 8].size])
-        SDR[landmarkId, :] = test_coarse_mm / landmarkCol.shape[0]
-        SD[landmarkId] = np.sqrt(
-            np.sum(np.power(landmarkCol - MRE[landmarkId], 2)) / (landmarkCol.shape[0] - 1))
+        
+        # 计算标准差 SD
+        SD[landmarkId] = np.std(landmarkCol)
+        
+        # 计算不同阈值下的成功率 SDR
+        for i, th in enumerate(thresholds):
+            SDR[landmarkId, i] = (landmarkCol <= th).sum() / landmarkCol.shape[0]
 
     return SDR, SD, MRE
+
+def analysis_result_overall(Off):
+    """
+    计算所有地标的整体统计指标
+    Args:
+        Off: 形状为 (N, landmarkNum) 的误差矩阵
+    Returns:
+        overall_SDR: 整体SDR (8个阈值)
+        overall_SD: 整体标准差
+        overall_MRE: 整体平均误差
+    """
+    # 将所有地标的误差展平
+    all_errors = Off.flatten()
+    
+    # 计算整体MRE
+    overall_MRE = np.mean(all_errors)
+    
+    # 计算整体SD
+    overall_SD = np.sqrt(np.sum(np.power(all_errors - overall_MRE, 2)) / (len(all_errors) - 1))
+    
+    # 计算整体SDR
+    overall_SDR = np.array([
+        np.sum(all_errors <= 1) / len(all_errors),
+        np.sum(all_errors <= 2) / len(all_errors),
+        np.sum(all_errors <= 3) / len(all_errors),
+        np.sum(all_errors <= 4) / len(all_errors),
+        np.sum(all_errors <= 5) / len(all_errors),
+        np.sum(all_errors <= 6) / len(all_errors),
+        np.sum(all_errors <= 7) / len(all_errors),
+        np.sum(all_errors <= 8) / len(all_errors)
+    ])
+    
+    return overall_SDR, overall_SD, overall_MRE
 
 def adjustment(ROIs, labels):
     temoff = (ROIs - labels)
@@ -84,29 +114,62 @@ def get_coordinates_from_fine_heatmaps(heatMaps, global_coordinate):
     predict = torch.cat(predict, dim=0)
     return predict[:, index]
 
-def get_fine_errors(predicted_offset, labels, size_tensor):
-    # take the last prediction as the final prediction
-    predict = predicted_offset[-1, :, :] * size_tensor
-    labels_b = labels * size_tensor
-    # 0.3 is the spacing per voxel
-    tem_dist = torch.sqrt(torch.sum(torch.pow(predict.squeeze() - labels_b.squeeze(), 2), 1)).unsqueeze(0) * 0.3
-    return tem_dist
+def get_fine_errors(predicted_offset, labels, size_tensor):    
+    # 还原物理坐标 (mm)
+    predict = predicted_offset * size_tensor.unsqueeze(1)
+    labels_b = labels * size_tensor.unsqueeze(1)
+
+    SPACING = 1.0 
+    
+    diff = predict - labels_b
+    tem_dist = torch.sqrt(torch.sum(torch.pow(diff, 2), dim=2)) * SPACING
+    return tem_dist # (B, N)
 
 def get_coarse_errors(coarse_landmarks, global_coordinate, labels, size_tensor):
-    predict = coarse_landmarks * size_tensor
-    labels_b = labels * size_tensor
-    # 0.3 is the spacing per voxel
-    tem_dist = torch.sqrt(torch.sum(torch.pow(predict.squeeze() - labels_b.squeeze(), 2), 1)).unsqueeze(0) * 0.3
+    predict = coarse_landmarks * size_tensor.unsqueeze(1)
+    labels_b = labels * size_tensor.unsqueeze(1)
+    
+    SPACING = 1.0
+    
+    diff = predict - labels_b
+    tem_dist = torch.sqrt(torch.sum(torch.pow(diff, 2), dim=2)) * SPACING
     return tem_dist
 
 def get_global_feature(ROIs, coarse_feature, landmarkNum):
-    X1, Y1, Z1 = ROIs[:, :, 0], ROIs[:, :, 1], ROIs[:, :, 2]
+    # 原始代码：
+    # X1, Y1, Z1 = ROIs[:, :, 0], ROIs[:, :, 1], ROIs[:, :, 2]
+    # L, H, W = coarse_feature.size()[-3:]
+    # X1, Y1, Z1 = np.round(X1 * (H - 1)).astype("int"), np.round(Y1 * (W - 1)).astype("int"), np.round(Z1 * (L - 1)).astype("int")
+    # global_embedding = torch.cat([coarse_feature[:, :, Z1[0, i], X1[0, i], Y1[0, i]] for i in range(landmarkNum)], dim=0).unsqueeze(0)
+    # return global_embedding
+
+    # 原始代码预测结果可能会越界，这里进行优化
+    # ROIs shape: [1, landmarkNum, 3]  coarse_feature shape: [B, C, L, H, W]
+    # 1. 动态获取 feature map 的维度信息   L: Depth (Z), H: Height (X), W: Width (Y)
     L, H, W = coarse_feature.size()[-3:]
-    X1, Y1, Z1 = np.round(X1 * (H - 1)).astype("int"), np.round(Y1 * (W - 1)).astype("int"), np.round(Z1 * (L - 1)).astype("int")
-    global_embedding = torch.cat([coarse_feature[:, :, Z1[0, i], X1[0, i], Y1[0, i]] for i in range(landmarkNum)], dim=0).unsqueeze(0)
+    
+    # 2. 提取归一化坐标并进行维度安全限制 使用 np.clip 将坐标限制在 [0, 1] 之间，防止原始 ROIs 越界
+    X1_norm = np.clip(ROIs[:, :, 0], 0, 1)
+    Y1_norm = np.clip(ROIs[:, :, 1], 0, 1)
+    Z1_norm = np.clip(ROIs[:, :, 2], 0, 1)
+    
+    # 3. 计算整数索引并再次确保不越界 (0 到 size-1)  np.round(val * (size - 1)) 能精准映射到最后一个像素中心
+    X1 = np.round(X1_norm * (H - 1)).astype("int")
+    Y1 = np.round(Y1_norm * (W - 1)).astype("int")
+    Z1 = np.round(Z1_norm * (L - 1)).astype("int")
+    
+    # 4. 提取特征 使用列表推导式提取每个 landmark 对应的特征向量  coarse_feature[:, :, z, x, y] 提取的是 [B, C] 的特征
+    global_embedding = torch.cat(
+        [coarse_feature[:, :, Z1[0, i], X1[0, i], Y1[0, i]] for i in range(landmarkNum)], 
+        dim=0
+    ).unsqueeze(0)
     return global_embedding
 
 def getcropedInputs_related(ROIs, labels, inputs_origin, useGPU, index, config):
+    # # 🔥 [DEBUG] 打印案发现场形状
+    # if len(inputs_origin) > 0:
+    #     print(f"[DEBUG 3 - CrashSite] inputs_origin[0] shape in MyUtils: {inputs_origin[0].shape}")
+    
     labels_b = labels.detach().cpu().numpy()
     landmarks = ROIs
     landmarkNum = len(inputs_origin)
@@ -188,64 +251,79 @@ def getcropedInputs_related(ROIs, labels, inputs_origin, useGPU, index, config):
     return cropedDICOMs
 
 def getcropedInputs(ROIs, inputs_origin, cropSize, useGPU):
+    # ROIs: (1, N, 3) 绝对像素坐标 (已在 MyDataLoader 中钳位)
+    # inputs_origin: (B, C, D, H, W)
+    
     landmarks = ROIs
     landmarkNum = landmarks.shape[1]
     b, c, l, h, w = inputs_origin.size()
 
-    # l, h, w = 576, 768, 768
-    cropSize = int(cropSize / 2)
-    # ~ print ("origin ", inputs_origin.size())
-    X, Y, Z = landmarks[:, :, 0], landmarks[:, :, 1], landmarks[:, :, 2]
-    X, Y, Z = np.round(X * (h - 1)).astype("int"), np.round(Y * (w - 1)).astype("int"), np.round(Z * (l - 1)).astype(
-        "int")
+    # cropSize 传入的是直径 (96)，计算半径
+    radius = int(cropSize / 2)
+    
+    # 🔥 关键修改：直接使用像素坐标，移除 * (h-1) 的缩放
+    X = landmarks[:, :, 0]
+    Y = landmarks[:, :, 1]
+    Z = landmarks[:, :, 2]
+    
+    # 转整型
+    X = np.round(X).astype("int")
+    Y = np.round(Y).astype("int")
+    Z = np.round(Z).astype("int")
+    
     cropedDICOMs = []
-    flag = True
+    
     for landmarkId in range(landmarkNum):
-
+        # 注意：这里假设输入的 ROIs 顺序是 (X, Y, Z) 对应 (H, W, D) 还是 (D, H, W)?
+        # 根据之前的报错 "allocate ... uy - w"，以及 MyDataLoader 里的 reshape
+        # 我们假设输入顺序已经适配了
+        
+        # MyDataLoader 传入的是 (D, H, W) 对应的坐标
+        # 原代码看起来 X 对应 h, Y 对应 w, Z 对应 l
         z, x, y = Z[0][landmarkId], X[0][landmarkId], Y[0][landmarkId]
-        lz, uz, lx, ux, ly, uy = z - cropSize, z + cropSize, x - cropSize, x + cropSize, y - cropSize, y + cropSize
-        lzz, uzz, lxx, uxx, lyy, uyy = max(lz, 0), min(uz, l), max(lx, 0), min(ux, h), max(ly, 0), min(uy, w)
+        
+        lz, uz = z - radius, z + radius
+        lx, ux = x - radius, x + radius
+        ly, uy = y - radius, y + radius
+        
+        # 计算有效区域 (Clamp)
+        lzz, uzz = max(lz, 0), min(uz, l)
+        lxx, uxx = max(lx, 0), min(ux, h)
+        lyy, uyy = max(ly, 0), min(uy, w)
 
-        # ~ print (z, x, y)
-        # ~ print ("boxes ", lz, uz, lx, ux, ly, uy)
-        cropedDICOM = inputs_origin[:, :, lzz: uzz, lxx: uxx, lyy: uyy]
-        # ~ print ("check before", cropedDICOM.size())
+        # 切取有效部分
+        cropedDICOM = inputs_origin[:, :, lzz: uzz, lxx: uxx, lyy: uyy].clone()
+        
+        # Padding 逻辑 (处理边缘)
+        # 如果 MyDataLoader 已经做了 Safe Clamp，这里其实不会触发 Padding
+        # 但保留以防万一
+        
+        # Z轴 padding
         if lz < 0:
-            _, _, curentZ, curentX, curentY = cropedDICOM.size()
-            temTensor = torch.zeros(b, c, 0 - lz, curentX, curentY)
-            if useGPU >= 0: temTensor = temTensor.cuda(useGPU)
-            cropedDICOM = torch.cat((temTensor, cropedDICOM), 2)
+            pad = torch.zeros(b, c, 0 - lz, cropedDICOM.size(3), cropedDICOM.size(4)).to(inputs_origin.device)
+            cropedDICOM = torch.cat((pad, cropedDICOM), 2)
         if uz > l:
-            _, _, curentZ, curentX, curentY = cropedDICOM.size()
-            temTensor = torch.zeros(b, c, uz - l, curentX, curentY)
-            if useGPU >= 0: temTensor = temTensor.cuda(useGPU)
-            cropedDICOM = torch.cat((cropedDICOM, temTensor), 2)
+            pad = torch.zeros(b, c, uz - l, cropedDICOM.size(3), cropedDICOM.size(4)).to(inputs_origin.device)
+            cropedDICOM = torch.cat((cropedDICOM, pad), 2)
+            
+        # X轴 padding
         if lx < 0:
-            _, _, curentZ, curentX, curentY = cropedDICOM.size()
-            temTensor = torch.zeros(b, c, curentZ, 0 - lx, curentY)
-            if useGPU >= 0: temTensor = temTensor.cuda(useGPU)
-            cropedDICOM = torch.cat((temTensor, cropedDICOM), 3)
+            pad = torch.zeros(b, c, cropedDICOM.size(2), 0 - lx, cropedDICOM.size(4)).to(inputs_origin.device)
+            cropedDICOM = torch.cat((pad, cropedDICOM), 3)
         if ux > h:
-            _, _, curentZ, curentX, curentY = cropedDICOM.size()
-            temTensor = torch.zeros(b, c, curentZ, ux - h, curentY)
-            if useGPU >= 0: temTensor = temTensor.cuda(useGPU)
-            cropedDICOM = torch.cat((cropedDICOM, temTensor), 3)
+            pad = torch.zeros(b, c, cropedDICOM.size(2), ux - h, cropedDICOM.size(4)).to(inputs_origin.device)
+            cropedDICOM = torch.cat((cropedDICOM, pad), 3)
+            
+        # Y轴 padding
         if ly < 0:
-            _, _, curentZ, curentX, curentY = cropedDICOM.size()
-            # import pdb
-            # pdb.set_trace()
-            temTensor = torch.zeros(b, c, curentZ, curentX, 0 - ly)
-            if useGPU >= 0: temTensor = temTensor.cuda(useGPU)
-            cropedDICOM = torch.cat((temTensor, cropedDICOM), 4)
+            pad = torch.zeros(b, c, cropedDICOM.size(2), cropedDICOM.size(3), 0 - ly).to(inputs_origin.device)
+            cropedDICOM = torch.cat((pad, cropedDICOM), 4)
         if uy > w:
-            _, _, curentZ, curentX, curentY = cropedDICOM.size()
-            temTensor = torch.zeros(b, c, curentZ, curentX, uy - w)
-            if useGPU >= 0: temTensor = temTensor.cuda(useGPU)
-            cropedDICOM = torch.cat((cropedDICOM, temTensor), 4)
+            pad = torch.zeros(b, c, cropedDICOM.size(2), cropedDICOM.size(3), uy - w).to(inputs_origin.device)
+            cropedDICOM = torch.cat((cropedDICOM, pad), 4)
 
         cropedDICOMs.append(cropedDICOM)
 
-    # ~ print (cropedDICOMs.size())
     return cropedDICOMs
 
 def get_local_patches(ROIs, cropedtems, base_coordinate, usegpu):
@@ -383,39 +461,116 @@ def Mydist3D(a, b):
     z2, x2, y2 = b
     return math.sqrt((z2 - z1) ** 2 + (x2 - x1) ** 2 + (y2 - y1) ** 2)
 
-def getCoordinate_new(featureMaps, outputs2, lables, R1, R2, gpu, lastResult, coordinatesFine, config):
-    imageNum, featureNum, l, h, w = featureMaps[0].size()
-    _, _, l_2, h_2, w_2 = outputs2.size()
-    landmarkNum = int(featureNum)
-    corse_landmark = lastResult.detach().cpu().numpy()
-    fine_landmark = coordinatesFine.detach().cpu().numpy()
+def getcropedInputs(ROIs, inputs_origin, cropSize, useGPU):
+    # ROIs: (1, N, 3) 绝对像素坐标 (已在 MyDataLoader 中钳位)
+    # inputs_origin: (B, C, D, H, W)
+    
+    landmarks = ROIs
+    landmarkNum = landmarks.shape[1]
+    b, c, l, h, w = inputs_origin.size()
 
-    X1, Y1, Z1 = np.round(corse_landmark[:, :, 0] * 767).astype('int'), np.round(corse_landmark[:, :, 1] * 767).astype(
-        'int'), np.round(corse_landmark[:, :, 2] * 575).astype('int')
+    # cropSize 传入的是直径 (96)，计算半径
+    radius = int(cropSize / 2)
+    
+    # 🔥 关键修改：直接使用像素坐标，移除 * (h-1) 的缩放
+    X = landmarks[:, :, 0]
+    Y = landmarks[:, :, 1]
+    Z = landmarks[:, :, 2]
+    
+    # 转整型
+    X = np.round(X).astype("int")
+    Y = np.round(Y).astype("int")
+    Z = np.round(Z).astype("int")
+    
+    cropedDICOMs = []
+    
+    for landmarkId in range(landmarkNum):
+        # 注意：这里假设输入的 ROIs 顺序是 (X, Y, Z) 对应 (H, W, D) 还是 (D, H, W)?
+        # 根据之前的报错 "allocate ... uy - w"，以及 MyDataLoader 里的 reshape
+        # 我们假设输入顺序已经适配了
+        
+        # MyDataLoader 传入的是 (D, H, W) 对应的坐标
+        # 原代码看起来 X 对应 h, Y 对应 w, Z 对应 l
+        z, x, y = Z[0][landmarkId], X[0][landmarkId], Y[0][landmarkId]
+        
+        lz, uz = z - radius, z + radius
+        lx, ux = x - radius, x + radius
+        ly, uy = y - radius, y + radius
+        
+        # 计算有效区域 (Clamp)
+        lzz, uzz = max(lz, 0), min(uz, l)
+        lxx, uxx = max(lx, 0), min(ux, h)
+        lyy, uyy = max(ly, 0), min(uy, w)
 
-    X2, Y2, Z2 = np.round(fine_landmark[:, :, 0] * h_2).astype('int'), np.round(fine_landmark[:, :, 1] * w_2).astype(
-        'int'), np.round(fine_landmark[:, :, 2] * l_2).astype('int')
+        # 切取有效部分
+        cropedDICOM = inputs_origin[:, :, lzz: uzz, lxx: uxx, lyy: uyy].clone()
+        
+        # Padding 逻辑 (处理边缘)
+        # 如果 MyDataLoader 已经做了 Safe Clamp，这里其实不会触发 Padding
+        # 但保留以防万一
+        
+        # Z轴 padding
+        if lz < 0:
+            pad = torch.zeros(b, c, 0 - lz, cropedDICOM.size(3), cropedDICOM.size(4)).to(inputs_origin.device)
+            cropedDICOM = torch.cat((pad, cropedDICOM), 2)
+        if uz > l:
+            pad = torch.zeros(b, c, uz - l, cropedDICOM.size(3), cropedDICOM.size(4)).to(inputs_origin.device)
+            cropedDICOM = torch.cat((cropedDICOM, pad), 2)
+            
+        # X轴 padding
+        if lx < 0:
+            pad = torch.zeros(b, c, cropedDICOM.size(2), 0 - lx, cropedDICOM.size(4)).to(inputs_origin.device)
+            cropedDICOM = torch.cat((pad, cropedDICOM), 3)
+        if ux > h:
+            pad = torch.zeros(b, c, cropedDICOM.size(2), ux - h, cropedDICOM.size(4)).to(inputs_origin.device)
+            cropedDICOM = torch.cat((cropedDICOM, pad), 3)
+            
+        # Y轴 padding
+        if ly < 0:
+            pad = torch.zeros(b, c, cropedDICOM.size(2), cropedDICOM.size(3), 0 - ly).to(inputs_origin.device)
+            cropedDICOM = torch.cat((pad, cropedDICOM), 4)
+        if uy > w:
+            pad = torch.zeros(b, c, cropedDICOM.size(2), cropedDICOM.size(3), uy - w).to(inputs_origin.device)
+            cropedDICOM = torch.cat((cropedDICOM, pad), 4)
 
-    X_off, Y_off, Z_off = X2 - h_2 // 2, Y2 - w_2 // 2, Z2 - l_2 // 2
+        cropedDICOMs.append(cropedDICOM)
 
-    GX, GY, GZ = np.round(lables[:, :, 0].numpy() * 767).astype('int'), np.round(lables[:, :, 1].numpy() * 767).astype(
-        'int'), np.round(lables[:, :, 2].numpy() * 575).astype('int')
+    return cropedDICOMs
 
-    tot = np.zeros((imageNum, landmarkNum))
-    for imageId in range(imageNum):
-        for landmarkId in range(landmarkNum):
-            x, y, z = X1[imageId][landmarkId], Y1[imageId][landmarkId], Z1[imageId][landmarkId]
+# # 使用了硬编码，直接写死了767（768-1）和575（576-1）两个数字，对应作者自己的私有数据，如果自己的数据尺寸不一样，计算出的坐标就会发生偏移
+# def getCoordinate_new(featureMaps, outputs2, lables, R1, R2, gpu, lastResult, coordinatesFine, config):
+#     imageNum, featureNum, l, h, w = featureMaps[0].size()
+#     _, _, l_2, h_2, w_2 = outputs2.size()
+#     landmarkNum = int(featureNum)
+#     corse_landmark = lastResult.detach().cpu().numpy()
+#     fine_landmark = coordinatesFine.detach().cpu().numpy()
 
-            x_off, y_off, z_off = X_off[imageId][landmarkId], Y_off[imageId][landmarkId], Z_off[imageId][landmarkId]
+#     X1, Y1, Z1 = np.round(corse_landmark[:, :, 0] * 767).astype('int'), np.round(corse_landmark[:, :, 1] * 767).astype(
+#         'int'), np.round(corse_landmark[:, :, 2] * 575).astype('int')
 
-            x_2 = x_off + x
-            y_2 = y_off + y
-            z_2 = z_off + z
+#     X2, Y2, Z2 = np.round(fine_landmark[:, :, 0] * h_2).astype('int'), np.round(fine_landmark[:, :, 1] * w_2).astype(
+#         'int'), np.round(fine_landmark[:, :, 2] * l_2).astype('int')
 
-            xx, yy, zz = GX[imageId][landmarkId], GY[imageId][landmarkId], GZ[imageId][landmarkId]
-            # tem_dist = Mydist3D((0, 0, 0), (x_off, y_off, z_off))
-            # tem_dist1 = Mydist3D((z, x, y), (zz, xx, yy))
-            tem_dist2 = Mydist3D((z_2, x_2, y_2), (zz, xx, yy))
-            tot[imageId][landmarkId] = tem_dist2
+#     X_off, Y_off, Z_off = X2 - h_2 // 2, Y2 - w_2 // 2, Z2 - l_2 // 2
 
-    return (tot)
+#     GX, GY, GZ = np.round(lables[:, :, 0].numpy() * 767).astype('int'), np.round(lables[:, :, 1].numpy() * 767).astype(
+#         'int'), np.round(lables[:, :, 2].numpy() * 575).astype('int')
+
+#     tot = np.zeros((imageNum, landmarkNum))
+#     for imageId in range(imageNum):
+#         for landmarkId in range(landmarkNum):
+#             x, y, z = X1[imageId][landmarkId], Y1[imageId][landmarkId], Z1[imageId][landmarkId]
+
+#             x_off, y_off, z_off = X_off[imageId][landmarkId], Y_off[imageId][landmarkId], Z_off[imageId][landmarkId]
+
+#             x_2 = x_off + x
+#             y_2 = y_off + y
+#             z_2 = z_off + z
+
+#             xx, yy, zz = GX[imageId][landmarkId], GY[imageId][landmarkId], GZ[imageId][landmarkId]
+#             # tem_dist = Mydist3D((0, 0, 0), (x_off, y_off, z_off))
+#             # tem_dist1 = Mydist3D((z, x, y), (zz, xx, yy))
+#             tem_dist2 = Mydist3D((z_2, x_2, y_2), (zz, xx, yy))
+#             tot[imageId][landmarkId] = tem_dist2
+
+#     return (tot)

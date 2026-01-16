@@ -1,7 +1,7 @@
 from __future__ import print_function, division
 import time
-from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
-import urlparse
+# from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
+# import urlparse
 import urllib
 import json
 import math
@@ -112,18 +112,18 @@ def landmarkDetection(image_name):
         
 	image = np.load(img_name)
 	image_origin = np.load(img_name_origin)
- 	print (type(image))
+	print (type(image))
 	image = (image-np.mean(image))/ np.std(image)
 	image_origin  = (image_origin-np.mean(image_origin))/ np.std(image_origin)
- 	print (type(image))
+	print (type(image))
 	image  = torch.from_numpy(image).float().unsqueeze(0).unsqueeze(0)
 	image_origin = torch.from_numpy(image_origin).float().unsqueeze(0).unsqueeze(0)
- 	print (type(image))
+	print (type(image))
 	data = {'DICOM': image, 'DICOM_origin': image_origin}
 	print (type(data['DICOM']))
- 	print (type(image))
+	print (type(image))
 	inputs, inputs_origin = data['DICOM'].cuda(use_gpu), data['DICOM_origin']
- 	print (inputs.size())
+	print (inputs.size())
 	heatMapsCorse, coordinatesCorse = corseNet(inputs)
 	coordinatesCorse = coordinatesCorse.unsqueeze(0)
 
@@ -148,52 +148,51 @@ def landmarkDetection(image_name):
 
 	return landmarks
 
-class MyHandler(BaseHTTPRequestHandler):
+# class MyHandler(BaseHTTPRequestHandler):
 
-    def do_GET(self):
-		try:
-			self.send_response(200)
-			self.send_header('Access-Control-Allow-Origin', '*')
-			self.end_headers()
-			response_string='Hello world'
-			values=urlparse.parse_qs(urlparse.urlsplit(self.path).query)
-			req=values['req'][0]
-			data=json.loads(req)
-			im_name=imagePath+data['imageUrl'].split('/')[-1].split('\\')[-1]
-			urllib.urlretrieve(data['imageUrl'], im_name)
+# 	def do_GET(self):
+# 		try:
+# 			self.send_response(200)
+# 			self.send_header('Access-Control-Allow-Origin', '*')
+# 			self.end_headers()
+# 			response_string='Hello world'
+# 			values=urlparse.parse_qs(urlparse.urlsplit(self.path).query)
+# 			req=values['req'][0]
+# 			data=json.loads(req)
+# 			im_name=imagePath+data['imageUrl'].split('/')[-1].split('\\')[-1]
+# 			urllib.urlretrieve(data['imageUrl'], im_name)
 			
-			land_marks = landmarkDetection(im_name)
-			response_data={}
-			imgid=1
-			response_data['coordinates'] = []
-			for landmark in land_marks:
-				coordinate_data={}
-				coordinate_data['landmarkId']='L'+str(imgid)
-				coordinate_data['y'] = math.floor(landmark[1])
-				coordinate_data['x']=math.floor(landmark[0])
-				response_data['coordinates'].append(coordinate_data)
-				imgid = imgid + 1
+# 			land_marks = landmarkDetection(im_name)
+# 			response_data={}
+# 			imgid=1
+# 			response_data['coordinates'] = []
+# 			for landmark in land_marks:
+# 				coordinate_data={}
+# 				coordinate_data['landmarkId']='L'+str(imgid)
+# 				coordinate_data['y'] = math.floor(landmark[1])
+# 				coordinate_data['x']=math.floor(landmark[0])
+# 				response_data['coordinates'].append(coordinate_data)
+# 				imgid = imgid + 1
 
-			response_data['apiKey'] = data['apiKey']
-			response_data['imageId'] = data['imageId']
+# 			response_data['apiKey'] = data['apiKey']
+# 			response_data['imageId'] = data['imageId']
 
-			response_string=json.dumps(response_data)
+# 			response_string=json.dumps(response_data)
 			
-			self.wfile.write(bytes(response_string))
-		except:
-			self.wfile.write(bytes("server_error"))
+# 			self.wfile.write(bytes(response_string))
+# 		except:
+# 			self.wfile.write(bytes("server_error"))
 
 if __name__ == '__main__':
     #~ server_class = HTTPServer
     #~ httpd = server_class((HOST_NAME, PORT_NUMBER), MyHandler)
-    corseNet, fineNet = loadPytorchModel()
+	corseNet, fineNet = loadPytorchModel()
     #TrainNet.test_model(corseNet, fineNet, dataloaders, criterion1, criterion2, optimizer_ft, epochs, use_gpu, R1, R2, saveName, landmarkNum, image_scale)
-    
-    landmarks = landmarkDetection("test")
-    with open('landmarks.txt', 'w') as f:
+	landmarks = landmarkDetection("test")
+	with open('landmarks.txt', 'w') as f:
 		for landmark in landmarks:
 			f.write(str(landmark[0]) + " " + str(landmark[1]) + " " + str(landmark[1]) + "\n" )
-    '''
+	'''
     print(time.asctime(), 'Server Starts - %s:%s' % (HOST_NAME, PORT_NUMBER))
     try:
         httpd.serve_forever()

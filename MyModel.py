@@ -159,10 +159,9 @@ class scn3d(nn.Module):
 
         return heatMaps, heatMaps
 
-
+# 训练过程中出现NaN，导致梯度爆炸，训练中断
 class coarseNet(nn.Module):
     def __init__(self, config):
-        # landmarkNum, use_gpu, image_scale
         super(coarseNet, self).__init__()
         self.landmarkNum = config.landmarkNum
         self.usegpu = config.use_gpu
@@ -174,12 +173,30 @@ class coarseNet(nn.Module):
         )
 
     def forward(self, x):
-        global_features = self.u_net(x)
-        x = self.conv3d(global_features) + 1e-9
-        heatmap_sum = torch.sum(x.view(self.landmarkNum, -1), dim=1)
-        # print(heatmap_sum.size())
-        global_heatmap = [x[0, i, :, :, :].squeeze() / heatmap_sum[i] for i in range(self.landmarkNum)]
-
+        # 1. 骨干网络提取特征
+        global_features = self.u_net(x)  # x: (B, 1, D, H, W)
+        # 2. Conv3D+激活+防除零（优化epsilon，统一为1e-8）
+        x = self.conv3d(global_features)  # x: (B, landmarkNum, D, H, W)
+        epsilon = 1e-9
+        x = x + epsilon  # 替换原代码的+1e-9，统一epsilon
+        # 3. 修复维度展平+求和（保留批次维度，核心修复）
+        batch_size = x.shape[0]  # 动态获取批次大小，适配任意B
+        flat_x = x.view(batch_size, self.landmarkNum, -1)  # (B, landmarkNum, D*H*W)
+        heatmap_sum = torch.sum(flat_x, dim=2)  # 仅对空间维度求和，shape: (B, landmarkNum)
+        # 网络只负责算，训练循环负责查，这里不对NaN进行检测
+        # # 4. 新增：除零检测+替换（避免0/0，定位异常关键点）
+        # zero_mask = heatmap_sum == 0
+        # if zero_mask.any():
+        #     zero_indices = torch.where(zero_mask)
+        #     print(f"⚠️  除以0风险：批次{zero_indices[0].tolist()}，关键点{zero_indices[1].tolist()}")
+        #     heatmap_sum = torch.clamp(heatmap_sum, min=epsilon)  # 替换0为epsilon
+        # 5. 归一化（保留列表推导式，修复广播除法）
+        global_heatmap = [
+            # x[:,i,...]：适配任意批次，替换原x[0,i,...]
+            # heatmap_sum[:,i].view(...)：扩充维度实现广播除法，适配(B,D,H,W)
+            x[:, i, :, :, :] / heatmap_sum[:, i].view(batch_size, 1, 1, 1)
+            for i in range(self.landmarkNum)
+        ]
         return global_heatmap, global_features
 
 class fine_LSTM(nn.Module):
@@ -244,7 +261,8 @@ class fine_LSTM(nn.Module):
                 ROIs = predict
 
             ROIs = MyUtils.adjustment(ROIs, labels)
-
+            # 这里加一个数值裁剪（限幅），避免ROIs越界
+            ROIs = torch.clamp(ROIs, 0.0, 1.0)
 
             cropedtems = MyUtils.getcropedInputs_related(ROIs.detach().cpu().numpy(), labels, inputs_origin, -1, i, self.config)
             cropedtems = torch.cat([cropedtems[i].cuda(self.usegpu) for i in range(len(cropedtems))], dim=0)

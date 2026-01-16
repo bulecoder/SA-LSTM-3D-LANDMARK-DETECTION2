@@ -20,7 +20,7 @@ import copy
 import time
 import PIL
 import json
-import h5py
+# import h5py
 import pickle as pkl
 import csv
 import argparse
@@ -36,14 +36,14 @@ import matplotlib.pyplot as plt
 from xml.dom import minidom
 from xml.etree import ElementTree as ET
 
-parser = argparse.ArgumentParser(description='preprocessing')
-parser.add_argument('--root_dir', dest='root_dir',
-                    help='root_dir',
-                    default=".", type=str)
+# parser = argparse.ArgumentParser(description='preprocessing')
+# parser.add_argument('--root_dir', dest='root_dir',
+#                     help='root_dir',
+#                     default=".", type=str)
 
-if len(sys.argv) == 1:
-    parser.print_help()
-# sys.exit(1)
+# if len(sys.argv) == 1:
+#     parser.print_help()
+# # sys.exit(1)
 
 '''
 landmarkList = ["Or-R", "Or-L", "Fz-R", "Fz-L", "Zy-R", "Zy-L", "Go-R", "Go-L", "PMP-R", "PMP-L",
@@ -55,20 +55,23 @@ landmarkList_low = ["or-r", "or-l", "fz-r", "fz-l", "zy-r", "zy-l", "go-r", "go-
 				"ba", "b", "sl", "me", "pog", "gn", "pog'", "me'", "gn'"]
 '''
 
+# 自己的数据集
+landmarkList = ['M5', 'M5L', 'M5R', 'M7', 'M7R', 'M7L', 'ANS', 'CM', 'ZR', 'PNS', 'ZL', 'N']
+landmarkList_low = ['m5', 'm5l', 'm5r', 'm7', 'm7r', 'm7l', 'ans', 'cm', 'zr', 'pns', 'zl', 'n']
 
-landmarkList = ["Or-R", "Or-L", "Zy-R", "Zy-L", "Go-R", "Go-L", "Po-R", "Po-L", "N", "ANS", "PNS", "A", "Ba", "B", "Me",
-                "Pog", "Gn"]
+# landmarkList = ["Or-R", "Or-L", "Zy-R", "Zy-L", "Go-R", "Go-L", "Po-R", "Po-L", "N", "ANS", "PNS", "A", "Ba", "B", "Me",
+#                 "Pog", "Gn"]
 
-landmarkList_low = ["or-r", "or-l", "zy-r", "zy-l", "go-r", "go-l", "po-r", "po-l", "n", "ans", "pns", "a", "ba", "b",
-                    "me", "pog", "gn"]
+# landmarkList_low = ["or-r", "or-l", "zy-r", "zy-l", "go-r", "go-l", "po-r", "po-l", "n", "ans", "pns", "a", "ba", "b",
+#                     "me", "pog", "gn"]
 
-args = parser.parse_args()
+# args = parser.parse_args()
 
-root_dir = args.root_dir
-target_dir = "processed_data"
-txt_dir = os.path.join(root_dir, "landmarks")
-img_dir = os.path.join(root_dir, "DICOMs")
-csv_file = os.path.join(target_dir, "test.csv")
+# root_dir = args.root_dir
+# target_dir = "processed_data"
+# txt_dir = os.path.join(root_dir, "landmarks")
+# img_dir = os.path.join(root_dir, "DICOMs")
+# csv_file = os.path.join(target_dir, "test.csv")
 
 def landmarkDataset(txt_dir, img_dir):
     tt = 0
@@ -213,3 +216,21 @@ def landmarkDataset(txt_dir, img_dir):
 
 
 # dataSet = landmarkDataset(txt_dir, img_dir)
+
+# 原始代码中这些逻辑没有放在 main 方法里面，导致在运行landmark.py的时候会执行这些内容，有一定程度的影响
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='preprocessing')
+    parser.add_argument('--root_dir', dest='root_dir', help='root_dir', default=".", type=str)
+    args = parser.parse_args()
+    if len(sys.argv) == 1:
+        parser.print_help()
+
+    root_dir = args.root_dir
+    target_dir = "processed_data"
+    txt_dir = os.path.join(root_dir, "landmarks")
+    img_dir = os.path.join(root_dir, "DICOMs")
+    # 注意：原本在这里的 csv_file 最好也移进来
+    csv_file = os.path.join(target_dir, "test.csv")
+    
+    # 执行函数
+    landmarkDataset(txt_dir, img_dir)
