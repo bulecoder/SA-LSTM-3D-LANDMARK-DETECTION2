@@ -25,26 +25,41 @@ from scipy.ndimage import zoom
 import MyUtils
 import torch.nn.functional as F
 
-def analysis_result(landmarkNum, Off): 
-    thresholds = [1, 2, 3, 4, 5, 6, 7, 8]
-    SDR = np.zeros((landmarkNum, len(thresholds)))
-    SD = np.zeros((landmarkNum))
+def analysis_result(landmarkNum, Off):  # 可以处理缺失值（带NaN的情况）
+    # 确保数据在 CPU 上以免占用显存，且方便计算
+    if Off.is_cuda:
+        Off = Off.cpu()
+
+    thresholds = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]
+    
+    # 初始化输出矩阵
+    SDR = torch.zeros((landmarkNum, len(thresholds)))
+    SD = torch.zeros((landmarkNum))
     
     # 1. 计算 MRE (Mean Radial Error)
-    MRE = np.mean(Off, axis=0)
+    MRE = torch.nanmean(Off, dim=0) 
 
     # 2. 计算 SDR 和 SD
     for landmarkId in range(landmarkNum):
         landmarkCol = Off[:, landmarkId]
         
-        # 计算标准差 SD
-        SD[landmarkId] = np.std(landmarkCol)
+        # 利用 torch.isnan 提取有效数据   ~torch.isnan() 表示取反，即“非NaN”
+        valid_mask = ~torch.isnan(landmarkCol)
+        valid_data = landmarkCol[valid_mask]
         
-        # 计算不同阈值下的成功率 SDR
-        for i, th in enumerate(thresholds):
-            SDR[landmarkId, i] = (landmarkCol <= th).sum() / landmarkCol.shape[0]
+        if valid_data.numel() > 0: # 如果有有效数据
+            # 计算标准差
+            SD[landmarkId] = torch.std(valid_data)
+            
+            # 计算不同阈值下的成功率 SDR
+            for i, th in enumerate(thresholds):
+                SDR[landmarkId, i] = torch.le(valid_data, th).float().mean() # torch.le 是 <= (Less Equal)  .float().mean() 自动计算 True 的比例
+        else:
+            SD[landmarkId] = 0.0
+            SDR[landmarkId, :] = 0.0
 
-    return SDR, SD, MRE
+    return SDR, SD, MRE         # 返回的MRE是一个列表，代表7个关键点各自的平均误差
+
 
 def analysis_result_overall(Off):
     """
@@ -98,7 +113,7 @@ def Mydist3D(a, b):
 
 def get_coordinates_from_coarse_heatmaps(predicted_heatmap, global_coordinate):
     lent = len(predicted_heatmap)
-    index = [1, 2, 0]
+    index = [2, 1, 0]       # 正确的索引
     global_coordinate_permute = global_coordinate.permute(3, 0, 1, 2)
     predict = [torch.sum((global_coordinate_permute * predicted_heatmap[i]).view(3, -1), dim = 1).unsqueeze(0) for i in range(lent)]
     predict = torch.cat(predict, dim=0)
@@ -114,25 +129,18 @@ def get_coordinates_from_fine_heatmaps(heatMaps, global_coordinate):
     predict = torch.cat(predict, dim=0)
     return predict[:, index]
 
-def get_fine_errors(predicted_offset, labels, size_tensor):    
-    # 还原物理坐标 (mm)
+def get_fine_errors(predicted_offset, labels, size_tensor):    # size_tensor 必须是物理尺寸 (mm)
     predict = predicted_offset * size_tensor.unsqueeze(1)
     labels_b = labels * size_tensor.unsqueeze(1)
-
-    SPACING = 1.0 
-    
-    diff = predict - labels_b
-    tem_dist = torch.sqrt(torch.sum(torch.pow(diff, 2), dim=2)) * SPACING
+    diff = predict - labels_b   # 计算差值(mm)
+    tem_dist = torch.norm(diff, p=2, dim=2) # 计算欧氏距离
     return tem_dist # (B, N)
 
-def get_coarse_errors(coarse_landmarks, global_coordinate, labels, size_tensor):
+def get_coarse_errors(coarse_landmarks, labels, size_tensor):
     predict = coarse_landmarks * size_tensor.unsqueeze(1)
     labels_b = labels * size_tensor.unsqueeze(1)
-    
-    SPACING = 1.0
-    
-    diff = predict - labels_b
-    tem_dist = torch.sqrt(torch.sum(torch.pow(diff, 2), dim=2)) * SPACING
+    diff = predict - labels_b   # 计算差值(mm)
+    tem_dist = torch.norm(diff, p=2, dim=2) # 计算欧氏距离
     return tem_dist
 
 def get_global_feature(ROIs, coarse_feature, landmarkNum):

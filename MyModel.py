@@ -159,7 +159,6 @@ class scn3d(nn.Module):
 
         return heatMaps, heatMaps
 
-# 训练过程中出现NaN，导致梯度爆炸，训练中断
 class coarseNet(nn.Module):
     def __init__(self, config):
         super(coarseNet, self).__init__()
@@ -183,13 +182,6 @@ class coarseNet(nn.Module):
         batch_size = x.shape[0]  # 动态获取批次大小，适配任意B
         flat_x = x.view(batch_size, self.landmarkNum, -1)  # (B, landmarkNum, D*H*W)
         heatmap_sum = torch.sum(flat_x, dim=2)  # 仅对空间维度求和，shape: (B, landmarkNum)
-        # 网络只负责算，训练循环负责查，这里不对NaN进行检测
-        # # 4. 新增：除零检测+替换（避免0/0，定位异常关键点）
-        # zero_mask = heatmap_sum == 0
-        # if zero_mask.any():
-        #     zero_indices = torch.where(zero_mask)
-        #     print(f"⚠️  除以0风险：批次{zero_indices[0].tolist()}，关键点{zero_indices[1].tolist()}")
-        #     heatmap_sum = torch.clamp(heatmap_sum, min=epsilon)  # 替换0为epsilon
         # 5. 归一化（保留列表推导式，修复广播除法）
         global_heatmap = [
             # x[:,i,...]：适配任意批次，替换原x[0,i,...]
@@ -250,7 +242,7 @@ class fine_LSTM(nn.Module):
 
         for i in range(0, self.iteration):
             ROIs = 0
-            if phase == 'train':
+            if phase == 'train':    # teacher forcing，下一次 ROI 位置是基于真值+噪声，而不是上一次的预测
                 if i == 0:
                     ROIs = labels + torch.from_numpy(np.random.normal(loc=0.0, scale=32.0 / self.origin_image_size[2] / 3, size = labels.size())).cuda(self.usegpu).float()
                 elif i == 1:
@@ -294,4 +286,4 @@ class fine_LSTM(nn.Module):
 
         predicts = torch.cat(predicts, dim=0)
 
-        return predicts
+        return predicts # 返回的是所有迭代的结果

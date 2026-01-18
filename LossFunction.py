@@ -64,100 +64,213 @@ class attentionLoss(nn.Module):
         # ~ print (torch.var(attention))
         return loss
 
-# TODO: 用到了这个
+# # TODO: 用到了这个
+# class coarse_heatmap(nn.Module):
+#     def __init__(self, config):
+#         # use_gpu, batchSize, landmarkNum, image_scale
+#         super(coarse_heatmap, self).__init__()
+#         self.use_gpu = config.use_gpu
+#         self.batchSize = config.batchSize
+#         self.landmarkNum = config.landmarkNum
+#         self.l1Loss = nn.L1Loss(reduction='none') # 改为 none 以便应用 Mask
+#         self.Long, self.higth, self.width = config.image_scale # (128, 128, 128)
+        
+#         # 创建一个足够大的高斯热图模板 (2倍尺寸)
+#         self.HeatMap_groundTruth = torch.zeros(self.Long * 2, self.higth * 2, self.width * 2).cuda(self.use_gpu)
+
+#         rr = 21  # 半径
+#         dev = 2  # 标准差（sigma)
+#         referPoint = (self.Long, self.higth, self.width)  # 中心点
+        
+#         # 预计算高斯分布
+#         # 优化：可以使用网格生成避免三重循环，但只运行一次初始化，忍了
+#         for k in range(referPoint[0] - rr, referPoint[0] + rr + 1):
+#             for i in range(referPoint[1] - rr, referPoint[1] + rr + 1):
+#                 for j in range(referPoint[2] - rr, referPoint[2] + rr + 1):
+#                     temdis = MyUtils.Mydist3D(referPoint, (k, i, j))
+#                     if temdis <= rr:
+#                         self.HeatMap_groundTruth[k][i][j] = math.exp(-1 * temdis**2 / (2 * dev**2))
+
+#     def forward(self, predicted_heatmap, local_coordinate, labels, phase):
+#         # 🔍 检查 CoarseNet 输出的真实尺寸
+#         sample_map = predicted_heatmap[0] # 取出第一个关键点的 Batch Tensor
+#         print(f"DEBUG: Predicted Heatmap Shape: {sample_map.shape}")
+        
+#         # 🔍 检查 Config 里的尺寸
+#         print(f"DEBUG: Config Size: {self.Long}, {self.higth}, {self.width}")
+
+#         loss = 0
+#         total_valid_points = 0
+        
+#         # labels shape: (B, N, 3) 归一化坐标 (0~1) 或者 -1 (缺失)
+        
+#         # 将归一化坐标转换为像素坐标
+#         # x, y, z 分别对应 High, Width, Long (注意这里的顺序需要和 MyDataLoader 一致)
+#         # 根据 MyDataLoader，输入是 (128, 128, 128)，所以乘的系数一样
+        
+#         # labels_pixel shape: (B, N, 3)
+#         scale_tensor = torch.tensor([self.higth - 1, self.width - 1, self.Long - 1]).cuda(self.use_gpu)
+#         labels_pixel = labels * scale_tensor
+#         labels_pixel = torch.round(labels_pixel).long() # 转整数索引
+
+#         batch_size = labels.shape[0]
+
+#         for b in range(batch_size):
+#             # 获取该样本的所有点坐标
+#             X = labels_pixel[b, :, 0] # H
+#             Y = labels_pixel[b, :, 1] # W
+#             Z = labels_pixel[b, :, 2] # D
+            
+#             # 获取原始归一化标签用于判断 Mask
+#             raw_labels = labels[b]
+
+#             for i in range(self.landmarkNum):
+#                 # Mask check: 如果坐标是负数 (缺失值)，跳过
+#                 if raw_labels[i, 0] < 0:
+#                     continue
+                
+#                 # 防止越界 (虽然 MyDataLoader 里处理了，但 safe check 很重要)
+#                 z_idx = torch.clamp(Z[i], 0, self.Long - 1)
+#                 x_idx = torch.clamp(X[i], 0, self.higth - 1)
+#                 y_idx = torch.clamp(Y[i], 0, self.width - 1)
+
+#                 # 根据真实位置裁剪热力图 GT
+#                 # 逻辑：从 HeatMap_groundTruth 中心扣出一块和预测图一样大的
+#                 # 如果点在左上角 (0,0,0)，就取 HeatMap 右下部分
+#                 # 索引逻辑比较绕，沿用原作者思路但增加安全性
+                
+#                 # 原始逻辑：self.Long - Z[i]
+#                 start_z = self.Long - z_idx
+#                 start_x = self.higth - x_idx
+#                 start_y = self.width - y_idx
+                
+#                 coarse_heatmap_gt = self.HeatMap_groundTruth[
+#                     start_z : start_z + self.Long,
+#                     start_x : start_x + self.higth,
+#                     start_y : start_y + self.width
+#                 ]
+                
+#                 # 归一化 GT
+#                 if coarse_heatmap_gt.sum() > 0:
+#                     coarse_heatmap_gt = coarse_heatmap_gt / coarse_heatmap_gt.sum()
+
+#                 # 计算 L1 Loss
+#                 # predicted_heatmap shape: (B, N, D, H, W)
+#                 pred = predicted_heatmap[i][b]
+                
+#                 loss += torch.abs(pred - coarse_heatmap_gt).sum()
+#                 total_valid_points += 1
+        
+#         if total_valid_points > 0:
+#             return loss / total_valid_points
+#         else:
+#             return torch.tensor(0.0).cuda(self.use_gpu)
+
 class coarse_heatmap(nn.Module):
     def __init__(self, config):
-        # use_gpu, batchSize, landmarkNum, image_scale
+        """
+        初始化：保持与原代码一致的参数接口
+        """
         super(coarse_heatmap, self).__init__()
         self.use_gpu = config.use_gpu
-        self.batchSize = config.batchSize
         self.landmarkNum = config.landmarkNum
-        self.l1Loss = nn.L1Loss(reduction='none') # 改为 none 以便应用 Mask
-        self.Long, self.higth, self.width = config.image_scale # (128, 128, 128)
-        
-        # 创建一个足够大的高斯热图模板 (2倍尺寸)
-        self.HeatMap_groundTruth = torch.zeros(self.Long * 2, self.higth * 2, self.width * 2).cuda(self.use_gpu)
+        self.depth, self.height, self.width = config.image_scale
+        self.sigma = getattr(config, 'sigma', 2.0)  # sigma，默认用 2 (与你旧代码的 dev=2 一致)
 
-        rr = 21  # 半径
-        dev = 2  # 标准差
-        referPoint = (self.Long, self.higth, self.width)  # 中心点
+    def generate_target_heatmap(self, labels_pixel, batch_size, device):
+        """
+        [内部函数] 现场生成高斯热图，替代旧代码的 self.HeatMap_groundTruth 裁剪逻辑
+        修复了旧代码中 X/Y 轴映射错误的 Bug。
+        """
+        # 1. 创建坐标网格 (D, H, W)
+        # indexing='ij' 意味着维度顺序是 (Axis 0, Axis 1, Axis 2) -> (D, H, W)
+        z = torch.arange(self.depth, device=device).float()
+        h = torch.arange(self.height, device=device).float()
+        w = torch.arange(self.width, device=device).float()
         
-        # 预计算高斯分布
-        # 优化：可以使用网格生成避免三重循环，但只运行一次初始化，忍了
-        for k in range(referPoint[0] - rr, referPoint[0] + rr + 1):
-            for i in range(referPoint[1] - rr, referPoint[1] + rr + 1):
-                for j in range(referPoint[2] - rr, referPoint[2] + rr + 1):
-                    temdis = MyUtils.Mydist3D(referPoint, (k, i, j))
-                    if temdis <= rr:
-                        self.HeatMap_groundTruth[k][i][j] = math.exp(-1 * temdis**2 / (2 * dev**2))
-
-    def forward(self, predicted_heatmap, local_coordinate, labels, phase):
-        loss = 0
-        total_valid_points = 0
+        grid_z, grid_h, grid_w = torch.meshgrid(z, h, w, indexing='ij')
         
-        # labels shape: (B, N, 3) 归一化坐标 (0~1) 或者 -1 (缺失)
+        targets = []
         
-        # 将归一化坐标转换为像素坐标
-        # x, y, z 分别对应 High, Width, Long (注意这里的顺序需要和 MyDataLoader 一致)
-        # 根据 MyDataLoader，输入是 (128, 128, 128)，所以乘的系数一样
-        
-        # labels_pixel shape: (B, N, 3)
-        scale_tensor = torch.tensor([self.higth - 1, self.width - 1, self.Long - 1]).cuda(self.use_gpu)
-        labels_pixel = labels * scale_tensor
-        labels_pixel = torch.round(labels_pixel).long() # 转整数索引
-
-        batch_size = labels.shape[0]
-
         for b in range(batch_size):
-            # 获取该样本的所有点坐标
-            X = labels_pixel[b, :, 0] # H
-            Y = labels_pixel[b, :, 1] # W
-            Z = labels_pixel[b, :, 2] # D
-            
-            # 获取原始归一化标签用于判断 Mask
-            raw_labels = labels[b]
-
-            for i in range(self.landmarkNum):
-                # Mask check: 如果坐标是负数 (缺失值)，跳过
-                if raw_labels[i, 0] < 0:
+            batch_targets = []
+            for n in range(self.landmarkNum):
+                # labels_pixel 是 [x, y, z] -> [Width, Height, Depth]
+                real_x = labels_pixel[b, n, 0] # Width
+                real_y = labels_pixel[b, n, 1] # Height
+                real_z = labels_pixel[b, n, 2] # Depth
+                
+                # [Mask Check] 缺失值处理：生成全黑图 (与旧代码逻辑一致)
+                if labels_pixel[b, n, 0] < 0: 
+                    batch_targets.append(torch.zeros_like(grid_z))
                     continue
                 
-                # 防止越界 (虽然 MyDataLoader 里处理了，但 safe check 很重要)
-                z_idx = torch.clamp(Z[i], 0, self.Long - 1)
-                x_idx = torch.clamp(X[i], 0, self.higth - 1)
-                y_idx = torch.clamp(Y[i], 0, self.width - 1)
+                # [生成高斯]
+                # 关键修复：正确对应坐标轴
+                # grid_w 对应 Width (x), grid_h 对应 Height (y), grid_z 对应 Depth (z)
+                dist_sq = (grid_w - real_x)**2 + (grid_h - real_y)**2 + (grid_z - real_z)**2
+                
+                # 生成未归一化的高斯
+                heatmap = torch.exp(-dist_sq / (2 * self.sigma**2))
+                
+                # [归一化] 
+                # 旧代码中: coarse_heatmap_gt / sum
+                # CoarseNet 输出的是概率分布（Sum=1），所以 GT 也必须 Sum=1
+                heatmap_sum = heatmap.sum()
+                if heatmap_sum > 0:
+                    heatmap = heatmap / heatmap_sum
+                
+                batch_targets.append(heatmap)
+            
+            # Stack landmarks: (N, D, H, W)
+            targets.append(torch.stack(batch_targets))
+            
+        # Stack batch: (B, N, D, H, W)
+        return torch.stack(targets)
 
-                # 根据真实位置裁剪热力图 GT
-                # 逻辑：从 HeatMap_groundTruth 中心扣出一块和预测图一样大的
-                # 如果点在左上角 (0,0,0)，就取 HeatMap 右下部分
-                # 索引逻辑比较绕，沿用原作者思路但增加安全性
-                
-                # 原始逻辑：self.Long - Z[i]
-                start_z = self.Long - z_idx
-                start_x = self.higth - x_idx
-                start_y = self.width - y_idx
-                
-                coarse_heatmap_gt = self.HeatMap_groundTruth[
-                    start_z : start_z + self.Long,
-                    start_x : start_x + self.higth,
-                    start_y : start_y + self.width
-                ]
-                
-                # 归一化 GT
-                if coarse_heatmap_gt.sum() > 0:
-                    coarse_heatmap_gt = coarse_heatmap_gt / coarse_heatmap_gt.sum()
-
-                # 计算 L1 Loss
-                # predicted_heatmap shape: (B, N, D, H, W)
-                pred = predicted_heatmap[i][b]
-                
-                loss += torch.abs(pred - coarse_heatmap_gt).sum()
-                total_valid_points += 1
+    def forward(self, predicted_heatmap, local_coordinate, labels, phase):
+        """
+        前向传播：保持接口完全不变
+        predicted_heatmap: list of tensors [(B, D, H, W), ...]
+        local_coordinate: 暂时没用到 (保持接口兼容)
+        labels: (B, N, 3) 归一化坐标
+        phase: 暂时没用到
+        """
+        batch_size = labels.shape[0]
         
-        if total_valid_points > 0:
-            return loss / total_valid_points
-        else:
-            return torch.tensor(0.0).cuda(self.use_gpu)
+        # 1. [适配旧输入] 将 list 转为 tensor
+        # CoarseNet 输出是 list，这里 stack 起来方便并行计算
+        # Shape: (B, N, D, H, W)
+        pred_tensor = torch.stack(predicted_heatmap, dim=1)
+        
+        # 2. [坐标转换] 归一化 -> 像素坐标
+        # labels 是 [x, y, z]，对应 [Width, Height, Depth]
+        scale = torch.tensor([self.width-1, self.height-1, self.depth-1], device=labels.device)
+        labels_pixel = labels * scale
+
+        # 3. [生成真值]
+        with torch.no_grad(): # GT 生成不需要梯度
+            target_heatmap = self.generate_target_heatmap(labels_pixel, batch_size, labels.device)
+        
+        # 4. [计算 Loss]
+        # Mask: 找出有效点 (x >= 0)
+        # shape: (B, N, 1, 1, 1) 以便广播
+        mask = (labels[:, :, 0] >= 0).view(batch_size, self.landmarkNum, 1, 1, 1).float()
+        
+        # [核心改动] 使用 MSE Loss (L2) 替代 L1 Loss
+        # 原因：对于高斯热图回归，MSE 通常比 L1 收敛更稳、更快，且对峰值更敏感。
+        # 同时保留了 Mask 机制
+        # loss = (pred_tensor - target_heatmap) ** 2 
+        loss = abs(pred_tensor - target_heatmap)    # 暂时先使用L1 Loss
+        
+        # 只对有效点求和
+        total_loss = (loss * mask).sum()
+        
+        # 归一化 Loss：除以有效点的数量 (防止 batch size 变化导致 loss 波动)
+        # 注意：这里分母加了 epsilon 防止除零
+        valid_points_count = mask.sum() + 1e-8
+        
+        return total_loss / valid_points_count
 
 # TODO： 用到了这个
 class fine_heatmap(nn.Module):
