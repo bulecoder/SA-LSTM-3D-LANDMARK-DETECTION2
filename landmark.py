@@ -1,27 +1,17 @@
 from __future__ import print_function, division
 import torch
-import torch.nn as nn
 import torch.optim as optim
-from torch.optim import lr_scheduler
-from torch.autograd import Variable
-import numpy as np
-import torchvision
-from torchvision import models, transforms, utils
+from torchvision import transforms
 import matplotlib.pyplot as plt
-from torch.utils.data import Dataset, DataLoader
-import time
+from torch.utils.data import DataLoader
 import os
-import math
-from copy import deepcopy
-import pandas as pd
-from MyDataLoader import Rescale, ToTensor, LandmarksDataset
+from MyDataLoader import ToTensor, LandmarksDataset
 import MyModel
 import TrainNet
 import LossFunction
 import argparse
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning) # 忽略所有 UserWarning 类型的警告
-
 plt.ion()  # interactive mode
 
 parser = argparse.ArgumentParser()
@@ -40,24 +30,20 @@ parser.add_argument("--data_enhanceNum", type=int, default=1)   # TODO:数据增
 parser.add_argument('--lr', type=float, default=0.0001)     # 学习率
 parser.add_argument("--spacing", type=tuple, default=(0.5, 0.5, 0.5))   # npy数据的体素间距
 parser.add_argument("--stage", type=str, default="test")       # 默认为训练模式
+parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint to resume from (e.g., 'runs/exp1/latest_checkpoint.pth')")
 # 输入数据部分参数
 parser.add_argument('--dataRoot', type=str, default="F:/CBCT/SA-LSTM-3D-Landmark-Detection2/processed_data/")   # npy格式数据路径
 parser.add_argument("--traincsv", type=str, default='train.csv')    # 训练数据
 parser.add_argument("--testcsv", type=str, default='test.csv')      # 测试数据
 # 输出保存部分参数
-parser.add_argument("--saveName", type=str, default='test3')         # 修改配置以后要修改saveName来保存训练数据
-parser.add_argument("--testName", type=str, default="test3")    # 选择哪个配置来测试数据
+parser.add_argument("--saveName", type=str, default='test2')         # 修改配置以后要修改saveName来保存训练数据
+parser.add_argument("--testName", type=str, default="test2")    # 选择哪个配置来测试数据
 
 
 def main():
     config = parser.parse_args()
     fine_LSTM = MyModel.fine_LSTM(config).cuda(config.use_gpu)
     coarseNet = MyModel.coarseNet(config).cuda(config.use_gpu)
-
-    # # 在测试阶段，从指定路径加载预训练好的模型权重文件，并将模型加载到指定的GPU上，map_location参数用于指定模型加载到指定的GPU上，默认为cuda(0)，即第0个GPU
-    # if config.stage == 'test':
-    #     fine_LSTM = torch.load('output/' + "730" + config.testName + "fine_LSTM.pkl", map_location=lambda storage, loc:storage.cuda(config.use_gpu))
-    #     coarseNet = torch.load('output/' + "730" + config.testName + "coarse.pkl", map_location=lambda storage, loc:storage.cuda(config.use_gpu))
 
     # 定义数据预处理流水线(Pipeline)转换为Tensor格式
     transform_origin = transforms.Compose([
@@ -112,14 +98,13 @@ def main():
     for data in val_dataloader_t:
         val_dataloader.append(data)
 
-    print(len(train_dataloader), len(val_dataloader))
+    print(f"train data:{len(train_dataloader)}, test data:{len(val_dataloader)}")
 
     dataloaders = {'train': train_dataloader, 'val': val_dataloader}
 
     criterion_coarse = LossFunction.coarse_heatmap(config)
     criterion_fine = LossFunction.fine_heatmap(config)
 
-    # Observe that all parameters are being optimized
     params = list(coarseNet.parameters()) + list(fine_LSTM.parameters())
 
     optimizer_ft = optim.Adam(params, lr=config.lr)

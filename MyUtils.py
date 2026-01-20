@@ -1,29 +1,16 @@
 from __future__ import print_function, division
 import torch
-import torch.nn as nn
-import torch.optim as optim
-from torch.optim import lr_scheduler
-from torch.autograd import Variable
 import numpy as np
-import torchvision
-from torchvision import models, transforms, utils
 import matplotlib.pyplot as plt
-from torch.utils.data import Dataset, DataLoader
-import time
-import os
-from skimage import io, transform
 import math
 from copy import deepcopy
 import pandas as pd
 import math
-import copy
-import time
-import PIL
-# import angle
 from PIL import Image, ImageDraw, ImageFont
 from scipy.ndimage import zoom
-import MyUtils
 import torch.nn.functional as F
+import logging
+import sys
 
 def analysis_result(landmarkNum, Off):  # 可以处理缺失值（带NaN的情况）
     # 确保数据在 CPU 上以免占用显存，且方便计算
@@ -545,40 +532,31 @@ def getcropedInputs(ROIs, inputs_origin, cropSize, useGPU):
 
     return cropedDICOMs
 
-# # 使用了硬编码，直接写死了767（768-1）和575（576-1）两个数字，对应作者自己的私有数据，如果自己的数据尺寸不一样，计算出的坐标就会发生偏移
-# def getCoordinate_new(featureMaps, outputs2, lables, R1, R2, gpu, lastResult, coordinatesFine, config):
-#     imageNum, featureNum, l, h, w = featureMaps[0].size()
-#     _, _, l_2, h_2, w_2 = outputs2.size()
-#     landmarkNum = int(featureNum)
-#     corse_landmark = lastResult.detach().cpu().numpy()
-#     fine_landmark = coordinatesFine.detach().cpu().numpy()
-
-#     X1, Y1, Z1 = np.round(corse_landmark[:, :, 0] * 767).astype('int'), np.round(corse_landmark[:, :, 1] * 767).astype(
-#         'int'), np.round(corse_landmark[:, :, 2] * 575).astype('int')
-
-#     X2, Y2, Z2 = np.round(fine_landmark[:, :, 0] * h_2).astype('int'), np.round(fine_landmark[:, :, 1] * w_2).astype(
-#         'int'), np.round(fine_landmark[:, :, 2] * l_2).astype('int')
-
-#     X_off, Y_off, Z_off = X2 - h_2 // 2, Y2 - w_2 // 2, Z2 - l_2 // 2
-
-#     GX, GY, GZ = np.round(lables[:, :, 0].numpy() * 767).astype('int'), np.round(lables[:, :, 1].numpy() * 767).astype(
-#         'int'), np.round(lables[:, :, 2].numpy() * 575).astype('int')
-
-#     tot = np.zeros((imageNum, landmarkNum))
-#     for imageId in range(imageNum):
-#         for landmarkId in range(landmarkNum):
-#             x, y, z = X1[imageId][landmarkId], Y1[imageId][landmarkId], Z1[imageId][landmarkId]
-
-#             x_off, y_off, z_off = X_off[imageId][landmarkId], Y_off[imageId][landmarkId], Z_off[imageId][landmarkId]
-
-#             x_2 = x_off + x
-#             y_2 = y_off + y
-#             z_2 = z_off + z
-
-#             xx, yy, zz = GX[imageId][landmarkId], GY[imageId][landmarkId], GZ[imageId][landmarkId]
-#             # tem_dist = Mydist3D((0, 0, 0), (x_off, y_off, z_off))
-#             # tem_dist1 = Mydist3D((z, x, y), (zz, xx, yy))
-#             tem_dist2 = Mydist3D((z_2, x_2, y_2), (zz, xx, yy))
-#             tot[imageId][landmarkId] = tem_dist2
-
-#     return (tot)
+# 使用log来记录，同时建立两条通道，一条通往.log文件，一条通往屏幕
+def get_logger(filename, verbosity=1, name=None):
+    """
+    创建一个日志记录器 logger
+    :param filename: 日志文件保存路径 (例如: runs/exp1/train.log)
+    :param verbosity: 日志级别
+    :param name: logger 的名字
+    :return: 配置好的 logger 对象
+    """
+    level_dict = {0: logging.DEBUG, 1: logging.INFO, 2: logging.WARNING}
+    formatter = logging.Formatter(
+        "[%(asctime)s][%(filename)s][line:%(lineno)d][%(levelname)s] %(message)s"
+    )
+    
+    logger = logging.getLogger(name)
+    logger.setLevel(level_dict[verbosity])
+    
+    # 1. File Handler (写入文件)
+    fh = logging.FileHandler(filename, "w", encoding='utf-8')
+    fh.setFormatter(formatter)
+    logger.addHandler(fh)
+    
+    # 2. Stream Handler (输出到终端/屏幕)
+    sh = logging.StreamHandler(sys.stdout)
+    sh.setFormatter(formatter)
+    logger.addHandler(sh)
+    
+    return logger

@@ -1,16 +1,10 @@
 from __future__ import print_function, division
 import torch
 import torch.nn as nn
-from torch.autograd import Variable
-import matplotlib.pyplot as plt
-import os
 import numpy as np
-import copy
 import MyUtils
 import torch.nn.functional as F
 import MyNetworkLayer as MNL
-# (16, 11) for 600; (10, 8) for 300; (37, 30) for 1000
-import math
 
 
 class Unet(nn.Module):
