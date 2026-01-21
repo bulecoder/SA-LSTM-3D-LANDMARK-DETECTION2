@@ -1,0 +1,46 @@
+# Default ignored files
+/shelf/
+/workspace.xml
+# Editor-based HTTP Client requests
+/httpRequests/
+# Datasource local storage ignored files
+/dataSources/
+/dataSources.local.xml
+
+# Python相关
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+*.egg-info/
+.eggs/
+dist/
+build/
+*.pyd
+*.pyo
+
+# 数据文件（核心：不上传大的数据集）
+processed_data/
+*.npy
+*.dcm
+*.dat
+*.csv
+*.png
+
+# 日志/缓存
+*.log
+*.tmp
+.cache/
+.DS_Store  # Mac系统文件
+Thumbs.db  # Windows系统文件
+
+# IDE配置
+.idea/
+.vscode/
+*.sublime-*
+
+# TensorBoard日志
+runs/ 

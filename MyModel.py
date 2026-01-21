@@ -160,6 +160,7 @@ class coarseNet(nn.Module):
         self.usegpu = config.use_gpu
         self.image_scale = config.image_scale
         self.u_net = MNL.U_Net3D(1, 64)
+        self.dropout = nn.Dropout3d(p=0.3)  # 30%概率丢弃特征，正则化抑制过拟合
         self.conv3d = nn.Sequential(
             nn.Conv3d(64, config.landmarkNum, 1, 1, 0),
             nn.Sigmoid(),
@@ -168,8 +169,9 @@ class coarseNet(nn.Module):
     def forward(self, x):
         # 1. 骨干网络提取特征
         global_features = self.u_net(x)  # x: (B, 1, D, H, W)
+        global_features_drop = self.dropout(global_features)    # 在进入最后的预测层之前，应用dropout
         # 2. Conv3D+激活+防除零（优化epsilon，统一为1e-8）
-        x = self.conv3d(global_features)  # x: (B, landmarkNum, D, H, W)
+        x = self.conv3d(global_features_drop)  # x: (B, landmarkNum, D, H, W)
         epsilon = 1e-9
         x = x + epsilon  # 替换原代码的+1e-9，统一epsilon
         # 3. 修复维度展平+求和（保留批次维度，核心修复）
@@ -183,7 +185,7 @@ class coarseNet(nn.Module):
             x[:, i, :, :, :] / heatmap_sum[:, i].view(batch_size, 1, 1, 1)
             for i in range(self.landmarkNum)
         ]
-        return global_heatmap, global_features
+        return global_heatmap, global_features      # 返回的 features 是原始的 global_features，没有加dropout，这样传给fineNet的特征是完整的，不会缺信息
 
 class fine_LSTM(nn.Module):
     def __init__(self, config):
@@ -252,8 +254,12 @@ class fine_LSTM(nn.Module):
 
             cropedtems = MyUtils.getcropedInputs_related(ROIs.detach().cpu().numpy(), labels, inputs_origin, -1, i, self.config)
             cropedtems = torch.cat([cropedtems[i].cuda(self.usegpu) for i in range(len(cropedtems))], dim=0)
-            features = self.encoder(cropedtems).squeeze().unsqueeze(0)
-
+            # 1. 获取 Encoder 的原始输出
+            features_raw = self.encoder(cropedtems)     # 如果 crop_size=32，形状是 [B, 512, 1, 1, 1]；如果 crop_size=64，形状是 [B, 512, 2, 2, 2]  
+            # 2. 强制压缩成 1x1x1
+            features_pooled = torch.nn.functional.adaptive_avg_pool3d(features_raw, (1, 1, 1))  # 无论 crop_size 多大，这里输出形状永远是 [B, 512, 1, 1, 1]
+            # 3. 调整维度以匹配后续全连接层
+            features = features_pooled.view(features_pooled.size(0), -1).unsqueeze(0)   # 严谨写法：先展平为 [B, 512]，再 unsqueeze
             global_feature = MyUtils.get_global_feature(ROIs.detach().cpu().numpy(), coarse_feature, self.landmarkNum)
             global_feature = self.graph_attention(ROIs, global_feature)
             features = torch.cat((features, global_feature), dim=2)

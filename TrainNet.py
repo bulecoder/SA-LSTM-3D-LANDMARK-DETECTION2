@@ -10,6 +10,7 @@ def train_model(coarse_net, fine_LSTM, dataloaders, criterion_coarse, criterion_
     since = time.time()
     test_epoch = 1         # epoch为5的倍数的时候，验证模型在测试集上的效果
     best_mre = float('inf')     # 最佳MRE
+    start_epoch = 0         # 默认从 epoch0 开始
 
     # --- 1. 准备保存路径 ---
     save_dir = os.path.join('runs', config.saveName)
@@ -48,8 +49,27 @@ def train_model(coarse_net, fine_LSTM, dataloaders, criterion_coarse, criterion_
     for i in range(gw): global_coordinate[:, :, i, 2] *= i
     global_coordinate = global_coordinate.cuda(config.use_gpu) * torch.tensor([1 / (gl - 1), 1 / (gh - 1), 1 / (gw - 1)]).cuda(config.use_gpu)
 
+    # --- 🔥 断点加载逻辑 (Resume) ---
+    if config.resume:
+        checkpoint_path = config.resume
+        if os.path.isdir(checkpoint_path):   # 如果传入的是文件夹 (例如: runs/test4)，自动拼接文件名
+            checkpoint_path = os.path.join(checkpoint_path, 'latest_checkpoint.pth')
+        
+        if os.path.isfile(checkpoint_path):  # 检查文件是否存在
+            logger.info(f"🔄 Loading checkpoint from: {checkpoint_path}")
+            checkpoint = torch.load(checkpoint_path)    # 加载 checkpoint
+            # 恢复状态
+            start_epoch = checkpoint['epoch'] + 1
+            best_mre = checkpoint['best_mre']
+            coarse_net.load_state_dict(checkpoint['coarse_state_dict'])
+            fine_LSTM.load_state_dict(checkpoint['fine_state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            logger.info(f"✅ Resumed training from Epoch {start_epoch}. Previous Best MRE: {best_mre:.4f}")
+        else:
+            logger.warning(f"⚠️ No checkpoint found at '{checkpoint_path}'. Starting from scratch.")
+
     # --- 训练循环 ---
-    for epoch in range(config.epochs):
+    for epoch in range(start_epoch, config.epochs):     # 从start_epoch开始训练
         print() # 每轮开始在控制台打印一个空行隔开，log里面不用管
         train_coarse_Off = []
         train_fine_Off = []
@@ -61,11 +81,16 @@ def train_model(coarse_net, fine_LSTM, dataloaders, criterion_coarse, criterion_
             pbar = tqdm(total=len(datas), desc=f'{phase} Epoch {epoch}') # 手动管理 tqdm，保持原始风格
 
             if phase == 'train':
-                coarse_net.train(True) 
+                coarse_net.train(True) # 开启训练模式
                 fine_LSTM.train(True)
+                # 临时测试一下
+                if epoch == 0 and i == 0: # 只在第0轮第0个batch打印一次，避免刷屏
+                    print(f"DEBUG: coarse_net.training = {coarse_net.training}")
+                    # 如果你刚才加了 self.dropout，可以具体打印它
+                    # print(f"DEBUG: dropout.training = {coarse_net.dropout.training}")
             else:
                 if epoch % test_epoch != 0: continue
-                coarse_net.train(False) 
+                coarse_net.train(False)    # 开启测试模式
                 fine_LSTM.train(False)
 
             lent = len(datas)
@@ -227,7 +252,7 @@ def train_model(coarse_net, fine_LSTM, dataloaders, criterion_coarse, criterion_
 
             # 保存最佳模型
             if current_test_mre < best_mre:
-                logger.info(f"🔥 New Best! MRE: {best_mre:.4f} -> {current_test_mre:.4f}")
+                logger.info(f"🔥 New Best! MRE: {best_mre:.4f} -> {current_test_mre:.4f} (Epoch {epoch})")
                 best_mre = current_test_mre
                 torch.save(coarse_net.state_dict(), os.path.join(save_dir, 'best_coarse.pth'))
                 torch.save(fine_LSTM.state_dict(), os.path.join(save_dir, 'best_fine_LSTM.pth'))
@@ -236,10 +261,17 @@ def train_model(coarse_net, fine_LSTM, dataloaders, criterion_coarse, criterion_
                 logger.info("")
                 print_detailed_results("TRAIN", c_mre_train, c_sd_train, f_mre_train, f_sd_train, sdr_train)
                 print_detailed_results("TEST ", c_mre_test, c_sd_test, f_mre_test, f_sd_test, sdr_test)
-            
-            # 保存最新模型 (防止中断)
-            torch.save(coarse_net.state_dict(), os.path.join(save_dir, 'latest_coarse.pth'))
-            torch.save(fine_LSTM.state_dict(), os.path.join(save_dir, 'latest_fine_LSTM.pth'))
+
+            # --- 🔥 保存断点 (包含优化器状态和Epoch) ---
+            checkpoint_state = {
+                'epoch': epoch,
+                'coarse_state_dict': coarse_net.state_dict(),
+                'fine_state_dict': fine_LSTM.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(), # 保存优化器状态
+                'best_mre': best_mre
+            }
+            torch.save(checkpoint_state, os.path.join(save_dir, 'latest_checkpoint.pth'), _use_new_zipfile_serialization=False)
+            logger.info(f"💾 Checkpoint saved: epoch {epoch}")
 
         logger.info("")     # 打印空行，为了终端显示美观，日志里面会有个空行
         torch.cuda.empty_cache()
@@ -278,8 +310,11 @@ def test_model(coarse_net, fine_LSTM, dataloader, config):      # 暂时没有�
     logger = MyUtils.get_logger(log_path) 
     logger.info(f"🚀 Start Testing: {config.testName}")
     logger.info(f"📁 Logs will be saved to: {save_dir}")
-    logger.info(f"{'Sample ID':<25} | {'Coarse MRE':<12} | {'Fine MRE':<12} | {'Scale (mm)':<25}")
-    logger.info("-" * 80)
+    landmark_names = ["AICV", "ANS", "BEP", "PNS", "TEE", "TEP", "TUV"]
+    header = f"{'Sample ID':<25} | {'Coarse MRE':<12} | {'Fine MRE':<12} | {'Scale (mm)':<25}"
+    for name in landmark_names: header += f" || {name[:4]+'_C':<10} | {name[:4]+'_F':<10}"     # 保持列宽紧凑，_C代表Coarse, _F代表Fine
+    logger.info(header)
+    logger.info("-" * len(header))
 
     with torch.no_grad():
         for i, data in enumerate(dataloader):
@@ -336,13 +371,28 @@ def test_model(coarse_net, fine_LSTM, dataloader, config):      # 暂时没有�
             c_mre_sample = torch.nanmean(c_err).item()      # torch.nanmean可以直接处理 tensor中的 nan
             f_mre_sample = torch.nanmean(f_err).item()
             scale_str = f"[{physical_scale[0,0]:.1f}, {physical_scale[0,1]:.1f}, {physical_scale[0,2]:.1f}]"
-            logger.info(f"{sample_name[:25]:<25} | {c_mre_sample:<12.4f} | {f_mre_sample:<12.4f} | {scale_str:<25}")
+            row_str = f"{sample_name[:25]:<25} | {c_mre_sample:<12.4f} | {f_mre_sample:<12.4f} | {scale_str:<25}"     # 基础信息字符串    
+            # 横向追加每个点的误差
+            c_vec = c_err[0].cpu().tolist()
+            f_vec = f_err[0].cpu().tolist()
+            
+            for k in range(config.landmarkNum):
+                val_c = c_vec[k]
+                val_f = f_vec[k]
+                # 处理 NaN 显示
+                str_c = f"{val_c:.2f}" if val_c == val_c else "nan" # 保留2位小数节省空间
+                str_f = f"{val_f:.2f}" if val_f == val_f else "nan"
+                row_str += f" || {str_c:<10} | {str_f:<10}"
+            
+            logger.info(row_str)
             if (i + 1) % 10 == 0: logger.info("")
 
     # --- 最终统计分析 ---
-    logger.info("="*50)
+    # logger.info("="*50)
+    logger.info("="*len(header)) # 保持宽度一致
     logger.info("📊 Final Test Results")
-    logger.info("="*50)
+    logger.info("="*len(header)) # 保持宽度一致
+    # logger.info("="*50)
     
     if len(fine_Off) > 0:
         coarse_Off = torch.cat(coarse_Off, dim=0)
@@ -358,24 +408,39 @@ def test_model(coarse_net, fine_LSTM, dataloader, config):      # 暂时没有�
         f_final_mre = torch.nanmean(fine_Off).item()
         f_final_sd = torch.std(fine_Off[~torch.isnan(fine_Off)]).item()
         
-        logger.info(f"✅ Coarse Stage:")
-        logger.info(f"   MRE: {c_final_mre:.4f} mm")
-        logger.info(f"   SD: {c_final_sd:.4f} mm")
-        
-        logger.info(f"✅ Fine Stage:")
-        logger.info(f"   MRE: {f_final_mre:.4f} mm")
-        logger.info(f"   SD: {f_final_sd:.4f} mm")
+        logger.info(f"✅ Global Statistics:")
+        logger.info(f"   Coarse Stage -> MRE: {c_final_mre:.4f} ± {c_final_sd:.4f} mm")
+        logger.info(f"   Fine   Stage -> MRE: {f_final_mre:.4f} ± {f_final_sd:.4f} mm")
+        logger.info("-" * 71)
+
+        # --- 详细的关键点统计表 (Per-Landmark Table) ---
+        logger.info(f"✅ Per-Landmark Statistics (Average over {len(fine_Off)} samples):")
+        sum_header = f"{'ID':<4} | {'Name':<6} || {'Coarse MRE':<12} | {'Coarse SD':<10} || {'Fine MRE':<12} | {'Fine SD':<10}"
+        logger.info(sum_header)
+        logger.info("-" * len(sum_header))
+
+        # 遍历每个关键点输出
+        for k in range(config.landmarkNum):
+            name = landmark_names[k]
+            # 处理 Tensor 或 float
+            cm = c_MRE_list[k] if isinstance(c_MRE_list, list) else c_MRE_list[k].item()
+            cs = c_SD[k] if isinstance(c_SD, list) else c_SD[k].item()
+            fm = f_MRE_list[k] if isinstance(f_MRE_list, list) else f_MRE_list[k].item()
+            fs = f_SD[k] if isinstance(f_SD, list) else f_SD[k].item()
+            logger.info(f"{k:<4} | {name:<6} || {cm:<12.4f} | {cs:<10.4f} || {fm:<12.4f} | {fs:<10.4f}")
+        logger.info("-" * len(sum_header))
         
         # 打印详细 SDR
         logger.info(f"✅ Fine Stage SDR (Success Detection Rate):")
         # 取所有关键点 SDR 的平均值作为全局 SDR
         mean_sdr = torch.mean(f_SDR, dim=0) * 100
-        
         thresholds = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0] # 对应 MyUtils 里的定义
-        for i, th in enumerate(thresholds):
-            logger.info(f"   {th}mm: {mean_sdr[i]:.2f}%")
+        sdr_str_list = [f"{th}mm: {val:.2f}%" for th, val in zip(thresholds, mean_sdr)]
+        for i in range(0, len(sdr_str_list), 4):
+            logger.info("   " + " | ".join(sdr_str_list[i:i+4]))
         
-    logger.info("="*50)
+    # logger.info("="*50)
+    logger.info("="*len(header))
 
     time_elapsed = time.time() - since
     logger.info('test complete in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
