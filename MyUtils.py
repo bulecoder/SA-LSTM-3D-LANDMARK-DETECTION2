@@ -160,89 +160,177 @@ def get_global_feature(ROIs, coarse_feature, landmarkNum):
     ).unsqueeze(0)
     return global_embedding
 
-def getcropedInputs_related(ROIs, labels, inputs_origin, useGPU, index, config):
-    # # 🔥 [DEBUG] 打印案发现场形状
-    # if len(inputs_origin) > 0:
-    #     print(f"[DEBUG 3 - CrashSite] inputs_origin[0] shape in MyUtils: {inputs_origin[0].shape}")
+# def getcropedInputs_related(ROIs, labels, inputs_origin, useGPU, index, config):
+#     # # 🔥 [DEBUG] 打印案发现场形状
+#     # if len(inputs_origin) > 0:
+#     #     print(f"[DEBUG 3 - CrashSite] inputs_origin[0] shape in MyUtils: {inputs_origin[0].shape}")
     
-    labels_b = labels.detach().cpu().numpy()
-    landmarks = ROIs
-    landmarkNum = len(inputs_origin)
+#     labels_b = labels.detach().cpu().numpy()
+#     landmarks = ROIs
+#     landmarkNum = len(inputs_origin)
 
-    b, c, l, h, w = inputs_origin[0].size()
+#     b, c, l, h, w = inputs_origin[0].size()
 
-    L, H, W = config.origin_image_size
-    cropSize = 0
-    if index == 0:
-        cropSize = 32
-    elif index == 1:
-        cropSize = 16
+#     L, H, W = config.origin_image_size
+#     cropSize = 0
+#     if index == 0:
+#         cropSize = 32
+#     elif index == 1:
+#         cropSize = 16
+#     else:
+#         cropSize = 8
+
+#     # ~ print ("origin ", inputs_origin.size())
+
+#     X1, Y1, Z1 = landmarks[:, :, 0], landmarks[:, :, 1], landmarks[:, :, 2]
+#     X1, Y1, Z1 = np.round(X1 * (H - 1)).astype("int"), np.round(Y1 * (W - 1)).astype("int"), np.round(Z1 * (L - 1)).astype("int")
+
+#     X2, Y2, Z2 = labels_b[:, :, 0], labels_b[:, :, 1], labels_b[:, :, 2]
+#     X2, Y2, Z2 = np.round(X2 * (H - 1)).astype("int"), np.round(Y2 * (W - 1)).astype("int"), np.round(Z2 * (L - 1)).astype("int")
+
+#     X, Y, Z = X1 - X2 + int(h/2), Y1 - Y2 + int(w/2), Z1 - Z2 + int(l/2)
+#     # print(X, Y, Z)
+
+
+#     cropedDICOMs = []
+#     flag = True
+#     for landmarkId in range(landmarkNum):
+#         z, x, y = Z[0][landmarkId], X[0][landmarkId], Y[0][landmarkId]
+
+#         # if z<0 or z >= l or x < 0 or x >=h or y < 0 or y >= w:
+#         #     cropedDICOMs.append(torch.zeros(1, 1, 32, 32, 32))
+#         #     continue
+
+#         lz, uz, lx, ux, ly, uy = z - cropSize, z + cropSize, x - cropSize, x + cropSize, y - cropSize, y + cropSize
+#         lzz, uzz, lxx, uxx, lyy, uyy = max(lz, 0), min(uz, l), max(lx, 0), min(ux, h), max(ly, 0), min(uy, w)
+
+#         # ~ print (z, x, y)
+#         # ~ print ("boxes ", lz, uz, lx, ux, ly, uy)
+#         cropedDICOM = inputs_origin[landmarkId][:, :, lzz: uzz, lxx: uxx, lyy: uyy].clone()
+#         # ~ print ("check before", cropedDICOM.size())
+#         if lz < 0:
+#             _, _, curentZ, curentX, curentY = cropedDICOM.size()
+#             temTensor = torch.zeros(b, c, 0 - lz, curentX, curentY)
+#             if useGPU >= 0: temTensor = temTensor.cuda(useGPU)
+#             cropedDICOM = torch.cat((temTensor, cropedDICOM), 2)
+#         if uz > l:
+#             _, _, curentZ, curentX, curentY = cropedDICOM.size()
+#             temTensor = torch.zeros(b, c, uz - l, curentX, curentY)
+#             if useGPU >= 0: temTensor = temTensor.cuda(useGPU)
+#             cropedDICOM = torch.cat((cropedDICOM, temTensor), 2)
+#         if lx < 0:
+#             _, _, curentZ, curentX, curentY = cropedDICOM.size()
+#             temTensor = torch.zeros(b, c, curentZ, 0 - lx, curentY)
+#             if useGPU >= 0: temTensor = temTensor.cuda(useGPU)
+#             cropedDICOM = torch.cat((temTensor, cropedDICOM), 3)
+#         if ux > h:
+#             _, _, curentZ, curentX, curentY = cropedDICOM.size()
+#             temTensor = torch.zeros(b, c, curentZ, ux - h, curentY)
+#             if useGPU >= 0: temTensor = temTensor.cuda(useGPU)
+#             cropedDICOM = torch.cat((cropedDICOM, temTensor), 3)
+#         if ly < 0:
+#             _, _, curentZ, curentX, curentY = cropedDICOM.size()
+#             temTensor = torch.zeros(b, c, curentZ, curentX, 0 - ly)
+#             if useGPU >= 0: temTensor = temTensor.cuda(useGPU)
+#             cropedDICOM = torch.cat((temTensor, cropedDICOM), 4)
+#         if uy > w:
+#             _, _, curentZ, curentX, curentY = cropedDICOM.size()
+#             temTensor = torch.zeros(b, c, curentZ, curentX, uy - w)
+#             if useGPU >= 0: temTensor = temTensor.cuda(useGPU)
+#             cropedDICOM = torch.cat((cropedDICOM, temTensor), 4)
+
+#         # cropedDICOMs.append(cropedDICOM)
+#         cropedDICOMs.append(F.upsample(cropedDICOM, size=(32, 32, 32), mode='trilinear'))
+
+#     # ~ print (cropedDICOMs.size())
+#     return cropedDICOMs
+
+
+# MyUtils.py 中的 getcropedInputs_related 函数
+
+def getcropedInputs_related(ROIs, labels, inputs_origin, useGPU, index, config):
+    """
+    针对 Full Image 的极简切图函数
+    直接根据 ROIs 在原图上切出 patch
+    """
+    # 1. 准备图像数据 (Tensor)
+    img_tensor = inputs_origin[0]
+
+    # 维度兼容性处理: (C, D, H, W) -> (1, C, D, H, W)
+    if img_tensor.dim() == 4:
+        img_tensor = img_tensor.unsqueeze(0)
+
+    # 现在的 img_tensor 保证是 5 维 (B, C, D, H, W)
+    b, c, D, H, W = img_tensor.size()
+    
+    # 2. 确定 Crop Size
+    base_size = 64 # 根据 config.crop_size 调整
+    if index == 0:   crop_r = base_size // 2      # r=32
+    elif index == 1: crop_r = base_size // 4      # r=16
+    else:            crop_r = base_size // 8      # r=8
+
+    # 3. 计算中心坐标 (反归一化)
+    # ROIs 可能传进来是 (Batch, N, 3)，这里取 Batch 0
+    current_rois = ROIs[0] # (N, 3)
+    landmarkNum = current_rois.shape[0]
+
+    L_o, H_o, W_o = config.origin_image_size
+    
+    # 🔥 [修复核心] 兼容 Tensor 和 Numpy 输入
+    if isinstance(current_rois, torch.Tensor):
+        x_raw = current_rois[:, 0].detach().cpu().numpy()
+        y_raw = current_rois[:, 1].detach().cpu().numpy()
+        z_raw = current_rois[:, 2].detach().cpu().numpy()
     else:
-        cropSize = 8
-
-    # ~ print ("origin ", inputs_origin.size())
-
-    X1, Y1, Z1 = landmarks[:, :, 0], landmarks[:, :, 1], landmarks[:, :, 2]
-    X1, Y1, Z1 = np.round(X1 * (H - 1)).astype("int"), np.round(Y1 * (W - 1)).astype("int"), np.round(Z1 * (L - 1)).astype("int")
-
-    X2, Y2, Z2 = labels_b[:, :, 0], labels_b[:, :, 1], labels_b[:, :, 2]
-    X2, Y2, Z2 = np.round(X2 * (H - 1)).astype("int"), np.round(Y2 * (W - 1)).astype("int"), np.round(Z2 * (L - 1)).astype("int")
-
-    X, Y, Z = X1 - X2 + int(h/2), Y1 - Y2 + int(w/2), Z1 - Z2 + int(l/2)
-    # print(X, Y, Z)
-
+        x_raw = current_rois[:, 0]
+        y_raw = current_rois[:, 1]
+        z_raw = current_rois[:, 2]
+    
+    # 计算像素坐标 (假设 ROIs 对应 W, H, D 即 X, Y, Z)
+    # 注意：请确保你的 ROIs 坐标定义和图像维度是一致的
+    cX = np.round(x_raw * (W_o - 1)).astype(int)
+    cY = np.round(y_raw * (H_o - 1)).astype(int)
+    cZ = np.round(z_raw * (L_o - 1)).astype(int)
 
     cropedDICOMs = []
-    flag = True
-    for landmarkId in range(landmarkNum):
-        z, x, y = Z[0][landmarkId], X[0][landmarkId], Y[0][landmarkId]
+    
+    # 4. 开始切图
+    for i in range(landmarkNum):
+        # 提取中心点 (PyTorch Tensor 顺序通常是 D, H, W -> z, y, x)
+        z, y, x = cZ[i], cY[i], cX[i]
+        
+        # 计算边界
+        lz, uz = z - crop_r, z + crop_r
+        ly, uy = y - crop_r, y + crop_r
+        lx, ux = x - crop_r, x + crop_r
+        
+        # 钳位边界 (用于 Slice)
+        lzz, uzz = max(lz, 0), min(uz, D)
+        lyy, uyy = max(ly, 0), min(uy, H)
+        lxx, uxx = max(lx, 0), min(ux, W)
+        
+        # 切片 (这里需要 5 维数据)
+        patch = img_tensor[:, :, lzz:uzz, lyy:uyy, lxx:uxx].clone()
+        
+        # Padding (如果切出界了补零)
+        pad_z_l = abs(lz) if lz < 0 else 0
+        pad_z_r = (uz - D) if uz > D else 0
+        pad_y_l = abs(ly) if ly < 0 else 0
+        pad_y_r = (uy - H) if uy > H else 0
+        pad_x_l = abs(lx) if lx < 0 else 0
+        pad_x_r = (ux - W) if ux > W else 0
+        
+        if (pad_x_l+pad_x_r+pad_y_l+pad_y_r+pad_z_l+pad_z_r) > 0:
+            # F.pad顺序: x_l, x_r, y_l, y_r, z_l, z_r
+            patch = torch.nn.functional.pad(patch, (pad_x_l, pad_x_r, pad_y_l, pad_y_r, pad_z_l, pad_z_r))
 
-        # if z<0 or z >= l or x < 0 or x >=h or y < 0 or y >= w:
-        #     cropedDICOMs.append(torch.zeros(1, 1, 32, 32, 32))
-        #     continue
+        # 统一 Resize (确保输出尺寸一致)
+        target_size = (64, 64, 64) 
+        if patch.shape[2:] != target_size:
+            patch = torch.nn.functional.interpolate(patch, size=target_size, mode='trilinear', align_corners=False)
+            
+        cropedDICOMs.append(patch)
 
-        lz, uz, lx, ux, ly, uy = z - cropSize, z + cropSize, x - cropSize, x + cropSize, y - cropSize, y + cropSize
-        lzz, uzz, lxx, uxx, lyy, uyy = max(lz, 0), min(uz, l), max(lx, 0), min(ux, h), max(ly, 0), min(uy, w)
-
-        # ~ print (z, x, y)
-        # ~ print ("boxes ", lz, uz, lx, ux, ly, uy)
-        cropedDICOM = inputs_origin[landmarkId][:, :, lzz: uzz, lxx: uxx, lyy: uyy].clone()
-        # ~ print ("check before", cropedDICOM.size())
-        if lz < 0:
-            _, _, curentZ, curentX, curentY = cropedDICOM.size()
-            temTensor = torch.zeros(b, c, 0 - lz, curentX, curentY)
-            if useGPU >= 0: temTensor = temTensor.cuda(useGPU)
-            cropedDICOM = torch.cat((temTensor, cropedDICOM), 2)
-        if uz > l:
-            _, _, curentZ, curentX, curentY = cropedDICOM.size()
-            temTensor = torch.zeros(b, c, uz - l, curentX, curentY)
-            if useGPU >= 0: temTensor = temTensor.cuda(useGPU)
-            cropedDICOM = torch.cat((cropedDICOM, temTensor), 2)
-        if lx < 0:
-            _, _, curentZ, curentX, curentY = cropedDICOM.size()
-            temTensor = torch.zeros(b, c, curentZ, 0 - lx, curentY)
-            if useGPU >= 0: temTensor = temTensor.cuda(useGPU)
-            cropedDICOM = torch.cat((temTensor, cropedDICOM), 3)
-        if ux > h:
-            _, _, curentZ, curentX, curentY = cropedDICOM.size()
-            temTensor = torch.zeros(b, c, curentZ, ux - h, curentY)
-            if useGPU >= 0: temTensor = temTensor.cuda(useGPU)
-            cropedDICOM = torch.cat((cropedDICOM, temTensor), 3)
-        if ly < 0:
-            _, _, curentZ, curentX, curentY = cropedDICOM.size()
-            temTensor = torch.zeros(b, c, curentZ, curentX, 0 - ly)
-            if useGPU >= 0: temTensor = temTensor.cuda(useGPU)
-            cropedDICOM = torch.cat((temTensor, cropedDICOM), 4)
-        if uy > w:
-            _, _, curentZ, curentX, curentY = cropedDICOM.size()
-            temTensor = torch.zeros(b, c, curentZ, curentX, uy - w)
-            if useGPU >= 0: temTensor = temTensor.cuda(useGPU)
-            cropedDICOM = torch.cat((cropedDICOM, temTensor), 4)
-
-        # cropedDICOMs.append(cropedDICOM)
-        cropedDICOMs.append(F.upsample(cropedDICOM, size=(32, 32, 32), mode='trilinear'))
-
-    # ~ print (cropedDICOMs.size())
     return cropedDICOMs
 
 def getcropedInputs(ROIs, inputs_origin, cropSize, useGPU):
@@ -560,3 +648,119 @@ def get_logger(filename, verbosity=1, name=None):
     logger.addHandler(sh)
     
     return logger
+
+class GPUAugmentor:
+    """
+    在 GPU 上对 3D 图像进行实时增强 (旋转、缩放、强度变换)
+    """
+    def __init__(self, device, angle_range=(-10, 10), scale_range=(0.9, 1.1)):
+        self.device = device
+        self.angle_range = angle_range
+        self.scale_range = scale_range
+
+    def __call__(self, images, landmarks):
+        """
+        :param images: (B, 1, D, H, W) Tensor
+        :param landmarks: (B, N, 3) Tensor, 坐标顺序必须是 (z, y, x) 对应 (D, H, W)
+        """
+        current_device = images.device
+        B, C, D, H, W = images.shape
+        
+        # --- 1. 随机参数生成 ---
+        # TODO:旋转角度 (弧度) - 目前只做 Z 轴旋转 (平面内旋转)，这是最关键的
+        angles = (torch.rand(B, device=current_device) * (self.angle_range[1] - self.angle_range[0]) + self.angle_range[0])
+        rads = torch.deg2rad(-angles) # 取反适配 grid_sample 方向
+
+        # 缩放因子
+        scales = (torch.rand(B, device=current_device) * (self.scale_range[1] - self.scale_range[0]) + self.scale_range[0])
+
+        # --- 2. 构建仿射变换矩阵 (B, 3, 4) ---
+        # 目标是构建一个矩阵，将像素网格进行旋转和缩放
+        theta = torch.zeros(B, 3, 4, device=current_device)
+        
+        cos_a = torch.cos(rads)
+        sin_a = torch.sin(rads)
+
+        # 缩放 + 旋转 (绕 D 轴 / Z 轴)
+        # 矩阵结构:
+        # [ sc,  0,   0,   0 ]
+        # [ 0,   c*s, -s*s, 0 ]
+        # [ 0,   s*s, c*s, 0 ]
+        
+        # D 轴 (Depth) 只缩放，不旋转
+        theta[:, 0, 0] = scales 
+        
+        # H, W 平面 (Height, Width) 进行旋转 + 缩放
+        theta[:, 1, 1] = scales * cos_a
+        theta[:, 1, 2] = -scales * sin_a * (W / H) # 修正宽高比，防止旋转后变形
+        theta[:, 2, 1] = scales * sin_a * (H / W)
+        theta[:, 2, 2] = scales * cos_a
+
+        # --- 3. 应用几何变换 (Grid Sample) ---
+        grid = F.affine_grid(theta, images.size(), align_corners=False)
+        aug_images = F.grid_sample(images, grid, mode='bilinear', padding_mode='zeros', align_corners=False)
+
+        # --- 4. 应用关键点变换 (矩阵乘法) ---
+        # 关键点旋转中心 (图像中心)
+        center = torch.tensor([D/2, H/2, W/2], device=current_device)
+        
+        # 构造对应的旋转矩阵 R (B, 3, 3)
+        R = torch.zeros(B, 3, 3, device=current_device)
+        R[:, 0, 0] = 1 
+        R[:, 1, 1] = cos_a
+        R[:, 1, 2] = -sin_a
+        R[:, 2, 1] = sin_a
+        R[:, 2, 2] = cos_a
+        
+        # 坐标变换公式: (P - Center) @ R.T * Scale + Center
+        # 注意：这里我们是在物理坐标系下操作，不需要像 grid_sample 那样考虑宽高比修正
+        landmarks = (landmarks - center)
+        landmarks = torch.bmm(landmarks, R.transpose(1, 2)) 
+        landmarks = landmarks * scales.unsqueeze(1).unsqueeze(2) + center
+
+        # --- 5. 强度/对比度变换 (Intensity Shift) ---
+        if torch.rand(1) < 0.5:
+            contrast = torch.rand(B, 1, 1, 1, 1, device=current_device) * 0.4 + 0.8 # 0.8 ~ 1.2
+            brightness = torch.rand(B, 1, 1, 1, 1, device=current_device) * 0.2 - 0.1 # -0.1 ~ 0.1
+            aug_images = aug_images * contrast + brightness
+            aug_images = torch.clamp(aug_images, 0.0, 1.0) # 保持归一化
+
+        return aug_images, landmarks
+    
+# 一键处理函数 (Clean Wrapper)
+def prepare_batch_input(data, config, phase, augmentor=None):
+    """
+    输入原始 Batch 数据，输出模型可直接用的 Coarse输入 和 Fine输入
+    """
+    # 1. 搬运到 GPU
+    inputs_origin = data['DICOM_origin'].cuda(config.use_gpu) # (B, D, H, W)
+    if len(inputs_origin.shape) == 3: inputs_origin = inputs_origin.unsqueeze(0).unsqueeze(0)
+    elif len(inputs_origin.shape) == 4: inputs_origin = inputs_origin.unsqueeze(1) # (B, 1, D, H, W)
+    
+    labels = data['landmarks'].cuda(config.use_gpu).float()
+
+    # 2. 训练阶段执行增强
+    if phase == 'train' and augmentor is not None:
+        inputs_origin, labels = augmentor(inputs_origin, labels)
+        
+        # 安全钳位
+        D, H, W = inputs_origin.shape[2:]
+        labels[:, :, 0] = torch.clamp(labels[:, :, 0], 0, D-1)
+        labels[:, :, 1] = torch.clamp(labels[:, :, 1], 0, H-1)
+        labels[:, :, 2] = torch.clamp(labels[:, :, 2], 0, W-1)
+
+    # 3. GPU 生成 Coarse 输入 (下采样)
+    inputs_coarse = torch.nn.functional.interpolate(inputs_origin, size=config.image_scale, mode='trilinear', align_corners=False)
+
+    # 4. 格式适配 (Hack)
+    # 因为你的 fine_LSTM 内部还在用 CPU 切图，我们需要把增强后的高清图转回 CPU list
+    # 虽然多了一步传输，但依然比 CPU 旋转快得多
+    inputs_origin_list = [inputs_origin[i].detach().cpu() for i in range(inputs_origin.shape[0])]
+
+    _, _, D, H, W = inputs_origin.shape
+
+    size_tensor = torch.tensor([D, H, W], device=labels.device).float()
+
+    labels = labels / size_tensor
+
+    return inputs_coarse, inputs_origin_list, labels

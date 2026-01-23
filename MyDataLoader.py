@@ -69,63 +69,36 @@ class ToTensor(object):
     """Convert ndarrays in sample to Tensors."""
 
     def __call__(self, sample):
-        DICOM, DICOM_origin, landmarks, imageName = sample['DICOM'], sample['DICOM_origin'], sample['landmarks'], sample['imageName']
+        # 1. 解包数据
+        DICOM_origin = sample['DICOM_origin']
+        landmarks = sample['landmarks']
+        imageName = sample['imageName']
+        
+        # 获取 Dataset 传过来的 size
+        # 如果 sample 里没有 size，就用 shape 计算
+        shape = sample.get('size', np.array(DICOM_origin.shape))
 
-        # 不再做 Z-Score 标准化   后续做了 0-1归一化
-        # # --- 1. 标准化 (Z-Score) ---
-        # std = np.std(DICOM)
-        # DICOM = (DICOM - np.mean(DICOM)) / std if std > 0 else DICOM - np.mean(DICOM)
-            
-        # std_origin = np.std(DICOM_origin)
-        # DICOM_origin = (DICOM_origin - np.mean(DICOM_origin)) / std_origin if std_origin > 0 else DICOM_origin - np.mean(DICOM_origin)
+        # 2. 转换为 Tensor (只转类型，不切图，不归一化)
+        # image: (D, H, W) -> (1, D, H, W)
+        img_tensor = torch.from_numpy(DICOM_origin).float().unsqueeze(0)
+        
+        # landmarks: 保持物理坐标 (N, 3)
+        lm_tensor = torch.from_numpy(landmarks).float()
 
-        # 获取尺寸
-        shape = np.array(DICOM_origin.shape) # (512, 512, 512)
-        
-        # --- 2. 准备切图坐标 ---
-        crop_landmarks_pixel = landmarks.copy() 
-        
-        # [A] 处理缺失值 (-1) -> 设为中心
-        missing_mask = crop_landmarks_pixel[:, 0] < 0
-        center = shape / 2.0
-        crop_landmarks_pixel[missing_mask] = center
-        
-        # [B] 安全钳位 (Clamp)
-        CROP_SIZE = 96
-        SAFE_MARGIN = CROP_SIZE // 2
-        
-        min_limit = SAFE_MARGIN
-        max_limit = shape - SAFE_MARGIN
-        
-        # 执行钳位
-        crop_landmarks_pixel = np.clip(crop_landmarks_pixel, min_limit, max_limit)
-
-        # --- 3. 执行切 Patch ---
-        DICOM_origin_tensor = torch.from_numpy(DICOM_origin).float().unsqueeze(0).unsqueeze(0)
-        
-        # 传入像素坐标 (float32)
-        crop_coords_input = crop_landmarks_pixel.reshape(1, -1, 3).astype(np.float32)
-        
-        # 调用修复后的 MyUtils
-        crop_list = MyUtils.getcropedInputs(crop_coords_input, DICOM_origin_tensor, CROP_SIZE, -1)
-        # crop_list = [item.unsqueeze(0) for item in crop_list]
-
-        # --- 4. 返回 ---
-        # 归一化坐标 (使用原始坐标，保留 -1 信息供 Loss 使用)
-        landmarks_normalized = landmarks / shape
-
-        # # 🔥 [DEBUG] 打印源头形状
-        # if len(crop_list) > 0:
-        #     print(f"\n[DEBUG 1 - Source] crop_list[0] shape in MyDataLoader: {crop_list[0].shape}")
-
-        return {
-            'DICOM': torch.from_numpy(DICOM).float().unsqueeze(0), 
-            'DICOM_origin': crop_list,
-            'DICOM_origin_vis': DICOM, 
-            'landmarks': torch.from_numpy(landmarks_normalized).float(), 
+        # 3. 构建返回字典
+        new_sample = {
+            'DICOM_origin': img_tensor, 
+            'landmarks': lm_tensor,
             'size': shape, 
             'imageName': imageName
         }
+        
+        # 4. 安全检查：如果未来某个时候 sample 里有了 'DICOM'，也顺便转一下
+        # 这样写不会报 KeyError
+        if 'DICOM' in sample:
+            new_sample['DICOM'] = torch.from_numpy(sample['DICOM']).float().unsqueeze(0)
+
+        return new_sample
 
 
 class LandmarksDataset(Dataset):
@@ -161,39 +134,41 @@ class LandmarksDataset(Dataset):
         min_val = image.min()
         max_val = image.max()
         if max_val - min_val > 1e-5:
-            image = (image - min_val) / (max_val - min_val) # 防止除以 0 (虽然概率很小，但必须有)
+            image -= min_val            # 原地减
+            image /= (max_val - min_val) # 原地除  防止除以 0 (虽然概率很小，但必须有)
         else:
-            image = image - min_val # 或者全变 0
+            image -= min_val # 或者全变 0
         return image
 
     def __getitem__(self, idx):
         filename = self.landmarks_frame.iloc[idx, 0]
         
-        # 🔍 打印进度 (每 10 个样本打印一次，防止刷屏)
-        if idx % 10 == 0:
-            print(f"   Loading sample [{idx}/{len(self)}]: {filename}")
+        # # 🔍 打印进度 (每 10 个样本打印一次，防止刷屏)
+        # if idx % 10 == 0:
+        #     print(f"   Loading sample [{idx}/{len(self)}]: {filename}")
         
-        img_name_coarse = os.path.join(self.root_dir, "96_" + filename)
+        # img_name_coarse = os.path.join(self.root_dir, "96_" + filename)
         img_name_fine = os.path.join(self.root_dir, filename)
         
         try:
-            image_coarse = np.load(img_name_coarse)  
+            # image_coarse = np.load(img_name_coarse)  
             image_fine = np.load(img_name_fine)  
-            # 归一化
-            image_coarse = self._minmax_normalize_cbct(image_coarse)
             image_fine = self._minmax_normalize_cbct(image_fine)
+            # 归一化
+            # image_coarse = self._minmax_normalize_cbct(image_coarse)
+            landmarks = self.landmarks_frame.iloc[idx, 1:self.landmarkNum * 3 + 1].values.astype('float')
+            landmarks = landmarks.reshape(-1, 3)
+            shape = np.array(image_fine.shape)
         except Exception as e:
             print(f"❌ Error loading {filename}: {e}")
             raise e
 
-        landmarks = self.landmarks_frame.iloc[idx, 1:self.landmarkNum * 3 + 1].values.astype('float')
-        landmarks = landmarks.reshape(-1, 3)
-
         sample = {
-            'DICOM': image_coarse, 
+            # 'DICOM': image_coarse, 
             'DICOM_origin': image_fine, 
             'landmarks': landmarks, 
-            'imageName': filename
+            'imageName': filename,
+            'size': shape
         }
 
         if self.transform:

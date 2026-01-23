@@ -4,6 +4,7 @@ import time
 import MyUtils
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
+import torch.nn.functional as F
 import os
 
 def train_model(coarse_net, fine_LSTM, dataloaders, criterion_coarse, criterion_fine, optimizer, config):
@@ -49,7 +50,7 @@ def train_model(coarse_net, fine_LSTM, dataloaders, criterion_coarse, criterion_
     for i in range(gw): global_coordinate[:, :, i, 2] *= i
     global_coordinate = global_coordinate.cuda(config.use_gpu) * torch.tensor([1 / (gl - 1), 1 / (gh - 1), 1 / (gw - 1)]).cuda(config.use_gpu)
 
-    # --- 🔥 断点加载逻辑 (Resume) ---
+    # --- 断点加载逻辑 (Resume) ---
     if config.resume:
         checkpoint_path = config.resume
         if os.path.isdir(checkpoint_path):   # 如果传入的是文件夹 (例如: runs/test4)，自动拼接文件名
@@ -67,6 +68,9 @@ def train_model(coarse_net, fine_LSTM, dataloaders, criterion_coarse, criterion_
             logger.info(f"✅ Resumed training from Epoch {start_epoch}. Previous Best MRE: {best_mre:.4f}")
         else:
             logger.warning(f"⚠️ No checkpoint found at '{checkpoint_path}'. Starting from scratch.")
+    
+    # 初始化 GPU 增强器
+    augmentor = MyUtils.GPUAugmentor(device=torch.device('cuda' if config.use_gpu else 'cpu'))
 
     # --- 训练循环 ---
     for epoch in range(start_epoch, config.epochs):     # 从start_epoch开始训练
@@ -98,10 +102,14 @@ def train_model(coarse_net, fine_LSTM, dataloaders, criterion_coarse, criterion_
 
             # 遍历数据
             for data in datas:
-                inputs = data['DICOM'].cuda(config.use_gpu) # (B, C, D, H, W)
-                inputs_origin_list = data['DICOM_origin']
-                inputs_origin = [item.squeeze(0) for item in inputs_origin_list]
-                labels = data['landmarks'].cuda(config.use_gpu) 
+                # inputs = data['DICOM'].cuda(config.use_gpu) # (B, C, D, H, W)
+                # inputs_origin_list = data['DICOM_origin']
+                # inputs_origin = [item.squeeze(0) for item in inputs_origin_list]
+                # inputs_origin = data['DICOM_origin'].cuda(config.use_gpu)
+                # labels = data['landmarks'].cuda(config.use_gpu)
+                inputs_coarse, inputs_origin_list, labels = MyUtils.prepare_batch_input(
+                    data, config, phase, augmentor
+                )
            
                 size = data['size'][0]
                 px_z, px_y, px_x = size[0].item(), size[1].item(), size[2].item()
@@ -123,7 +131,8 @@ def train_model(coarse_net, fine_LSTM, dataloaders, criterion_coarse, criterion_
                 # 显存控制：验证阶段不构建计算图 防止验证集吃掉显存
                 with torch.set_grad_enabled(phase == 'train'):
                     # 前向传播 (Forward)
-                    coarse_heatmap, coarse_feature = coarse_net(inputs)
+                    # coarse_heatmap, coarse_feature = coarse_net(inputs)
+                    coarse_heatmap, coarse_feature = coarse_net(inputs_coarse)
 
                     # 第一道关卡：检查网络输出是否正常 
                     has_nan = any(torch.isnan(h).any() for h in coarse_heatmap)     # 检查 list 中任何一个 tensor 是否有 NaN
@@ -138,7 +147,8 @@ def train_model(coarse_net, fine_LSTM, dataloaders, criterion_coarse, criterion_
                     coarse_landmarks = torch.clamp(coarse_landmarks, 0.0, 1.0)
                     
                     # Fine Stage
-                    fine_landmarks_all = fine_LSTM(coarse_landmarks, labels, inputs_origin, coarse_feature, phase, size_tensor_inv)
+                    # fine_landmarks_all = fine_LSTM(coarse_landmarks, labels, inputs_origin, coarse_feature, phase, size_tensor_inv)
+                    fine_landmarks_all = fine_LSTM(coarse_landmarks, labels, inputs_origin_list, coarse_feature, phase, size_tensor_inv)
 
                     # 计算 Loss (Original Logic)
                     mask_loss = (labels[:, :, 0] >= 0).float().unsqueeze(2)

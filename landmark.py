@@ -25,18 +25,18 @@ parser.add_argument("--use_gpu", type=int, default=0)
 parser.add_argument("--iteration", type=int, default=3)                 # LSTM的长度
 # parser.add_argument("--R1", type=int, default=5)              # 暂时没有使用到这两个参数
 # parser.add_argument("--R2", type=int, default=9)
-parser.add_argument("--epochs", type=int, default=500)          # 迭代次数
-parser.add_argument("--data_enhanceNum", type=int, default=1)   # TODO:数据增强
+parser.add_argument("--epochs", type=int, default=50)          # 迭代次数
+parser.add_argument("--data_enhanceNum", type=int, default=5)   # TODO:数据增强
 parser.add_argument('--lr', type=float, default=0.0001)     # 学习率
 parser.add_argument("--spacing", type=tuple, default=(0.5, 0.5, 0.5))   # npy数据的体素间距
 parser.add_argument("--stage", type=str, default="train")       # 默认为训练模式
 parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint to resume from (e.g., 'runs/exp1')") # 从哪个路径下的权重开始继续训练
 # 输入数据部分参数
-parser.add_argument('--dataRoot', type=str, default="F:/CBCT/SA-LSTM-3D-Landmark-Detection2/processed_data/")   # npy格式数据路径
+parser.add_argument('--dataRoot', type=str, default="./processed_data/")   # npy格式数据路径  使用根目录，这样服务器上面可以直接运行
 parser.add_argument("--traincsv", type=str, default='train.csv')    # 训练数据
 parser.add_argument("--testcsv", type=str, default='test.csv')      # 测试数据
 # 输出保存部分参数 
-parser.add_argument("--saveName", type=str, default='regularization')         # 修改配置以后要修改saveName来保存训练数据
+parser.add_argument("--saveName", type=str, default='Data_enhance_test')         # 修改配置以后要修改saveName来保存训练数据
 # 加载哪个文件夹的权重进行测试
 parser.add_argument("--testName", type=str, default="test3")    # 选择哪个配置来测试数据
 
@@ -72,7 +72,6 @@ def main():
         
         # 3. 执行测试
         TrainNet.test_model(coarseNet, fine_LSTM, test_dataloader, config)
-        
         return # 测试结束后直接退出
 
     train_dataset_origin = LandmarksDataset(csv_file=config.dataRoot + config.traincsv,
@@ -87,17 +86,36 @@ def main():
                                    landmarksNum=config.landmarkNum
                                    )
     
-    train_dataloader = []
-    val_dataloader = []
+    # train_dataloader = []
+    # val_dataloader = []
 
-    # 创建训练数据加载器，可高效读取的批量数据
-    train_dataloader_t = DataLoader(train_dataset_origin, batch_size=config.batchSize, shuffle=False, num_workers=0)
-    for data in train_dataloader_t:
-        train_dataloader.append(data)
+    # # 创建训练数据加载器，可高效读取的批量数据
+    # train_dataloader_t = DataLoader(train_dataset_origin, batch_size=config.batchSize, shuffle=False, num_workers=0)
+    # for data in train_dataloader_t:
+    #     train_dataloader.append(data)
 
-    val_dataloader_t = DataLoader(val_dataset, batch_size=config.batchSize, shuffle=False, num_workers=0)
-    for data in val_dataloader_t:
-        val_dataloader.append(data)
+    # val_dataloader_t = DataLoader(val_dataset, batch_size=config.batchSize, shuffle=False, num_workers=0)
+    # for data in val_dataloader_t:
+    #     val_dataloader.append(data)
+
+    # 直接使用 DataLoader，不要用 List Append！
+    # 这样程序会瞬间启动，训练时后台加载
+    train_dataloader = DataLoader(
+        train_dataset_origin, 
+        batch_size=config.batchSize, 
+        shuffle=True,       # 必须打乱
+        num_workers=0,      # 设置为 CPU 核心数
+        pin_memory=True,    # 加速 CPU -> GPU 传输
+        # persistent_workers=True
+    )
+    # 验证集
+    val_dataloader = DataLoader(
+        val_dataset, 
+        batch_size=config.batchSize, 
+        shuffle=False, 
+        num_workers=0,
+        # pin_memory=True
+    )
 
     print(f"train data:{len(train_dataloader)}, test data:{len(val_dataloader)}")
 
