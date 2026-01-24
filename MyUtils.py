@@ -248,20 +248,24 @@ def get_global_feature(ROIs, coarse_feature, landmarkNum):
 
 # MyUtils.py 中的 getcropedInputs_related 函数
 
-def getcropedInputs_related(ROIs, labels, inputs_origin, useGPU, index, config):
+def getcropedInputs_related(ROIs, labels, inputs_origin, useGPU, index, config):        # 直接在GPU上切图
     """
     针对 Full Image 的极简切图函数
     直接根据 ROIs 在原图上切出 patch
     """
     # 1. 准备图像数据 (Tensor)
-    img_tensor = inputs_origin[0]
+    img_tensor = inputs_origin
+
+    if isinstance(img_tensor, list):    # 兼容:如果传进来的是list,取第0个
+        img_tensor = img_tensor[0]
 
     # 维度兼容性处理: (C, D, H, W) -> (1, C, D, H, W)
     if img_tensor.dim() == 4:
         img_tensor = img_tensor.unsqueeze(0)
 
     # 现在的 img_tensor 保证是 5 维 (B, C, D, H, W)
-    b, c, D, H, W = img_tensor.size()
+    # b, c, D, H, W = img_tensor.size()
+    _, _, D, H, W = img_tensor.shape
     
     # 2. 确定 Crop Size
     base_size = 64 # 根据 config.crop_size 调整
@@ -277,24 +281,33 @@ def getcropedInputs_related(ROIs, labels, inputs_origin, useGPU, index, config):
     L_o, H_o, W_o = config.origin_image_size
     
     # 🔥 [修复核心] 兼容 Tensor 和 Numpy 输入
+    # if isinstance(current_rois, torch.Tensor):
+    #     x_raw = current_rois[:, 0].detach().cpu().numpy()
+    #     y_raw = current_rois[:, 1].detach().cpu().numpy()
+    #     z_raw = current_rois[:, 2].detach().cpu().numpy()
+    # else:
+    #     x_raw = current_rois[:, 0]
+    #     y_raw = current_rois[:, 1]
+    #     z_raw = current_rois[:, 2]
+    
     if isinstance(current_rois, torch.Tensor):
-        x_raw = current_rois[:, 0].detach().cpu().numpy()
-        y_raw = current_rois[:, 1].detach().cpu().numpy()
-        z_raw = current_rois[:, 2].detach().cpu().numpy()
+        rois_cpu = current_rois.detach().cpu().numpy()
     else:
-        x_raw = current_rois[:, 0]
-        y_raw = current_rois[:, 1]
-        z_raw = current_rois[:, 2]
+        rois_cpu = current_rois
     
     # 计算像素坐标 (假设 ROIs 对应 W, H, D 即 X, Y, Z)
     # 注意：请确保你的 ROIs 坐标定义和图像维度是一致的
-    cX = np.round(x_raw * (W_o - 1)).astype(int)
-    cY = np.round(y_raw * (H_o - 1)).astype(int)
-    cZ = np.round(z_raw * (L_o - 1)).astype(int)
+    # cX = np.round(x_raw * (W_o - 1)).astype(int)
+    # cY = np.round(y_raw * (H_o - 1)).astype(int)
+    # cZ = np.round(z_raw * (L_o - 1)).astype(int)
+
+    cX = np.round(rois_cpu[:, 0] * (W_o - 1)).astype(int)
+    cY = np.round(rois_cpu[:, 1] * (H_o - 1)).astype(int)
+    cZ = np.round(rois_cpu[:, 2] * (L_o - 1)).astype(int)
 
     cropedDICOMs = []
     
-    # 4. 开始切图
+    # 4. 开始切图(直接在GPU上切片)
     for i in range(landmarkNum):
         # 提取中心点 (PyTorch Tensor 顺序通常是 D, H, W -> z, y, x)
         z, y, x = cZ[i], cY[i], cX[i]
@@ -310,7 +323,8 @@ def getcropedInputs_related(ROIs, labels, inputs_origin, useGPU, index, config):
         lxx, uxx = max(lx, 0), min(ux, W)
         
         # 切片 (这里需要 5 维数据)
-        patch = img_tensor[:, :, lzz:uzz, lyy:uyy, lxx:uxx].clone()
+        # patch = img_tensor[:, :, lzz:uzz, lyy:uyy, lxx:uxx].clone()
+        patch = img_tensor[:, :, lzz:uzz, lyy:uyy, lxx:uxx] # 这里不要 .clone() 以节省显存，除非报错
         
         # Padding (如果切出界了补零)
         pad_z_l = abs(lz) if lz < 0 else 0
@@ -755,7 +769,7 @@ def prepare_batch_input(data, config, phase, augmentor=None):
     # 4. 格式适配 (Hack)
     # 因为你的 fine_LSTM 内部还在用 CPU 切图，我们需要把增强后的高清图转回 CPU list
     # 虽然多了一步传输，但依然比 CPU 旋转快得多
-    inputs_origin_list = [inputs_origin[i].detach().cpu() for i in range(inputs_origin.shape[0])]
+    # inputs_origin_list = [inputs_origin[i].detach().cpu() for i in range(inputs_origin.shape[0])]
 
     _, _, D, H, W = inputs_origin.shape
 
@@ -763,4 +777,5 @@ def prepare_batch_input(data, config, phase, augmentor=None):
 
     labels = labels / size_tensor
 
-    return inputs_coarse, inputs_origin_list, labels
+    # return inputs_coarse, inputs_origin_list, labels
+    return inputs_coarse, inputs_origin, labels     # 直接返回GPU Tensor,不转List,不转CPU

@@ -107,7 +107,7 @@ def train_model(coarse_net, fine_LSTM, dataloaders, criterion_coarse, criterion_
                 # inputs_origin = [item.squeeze(0) for item in inputs_origin_list]
                 # inputs_origin = data['DICOM_origin'].cuda(config.use_gpu)
                 # labels = data['landmarks'].cuda(config.use_gpu)
-                inputs_coarse, inputs_origin_list, labels = MyUtils.prepare_batch_input(
+                inputs_coarse, inputs_origin_tensor, labels = MyUtils.prepare_batch_input(
                     data, config, phase, augmentor
                 )
            
@@ -148,7 +148,7 @@ def train_model(coarse_net, fine_LSTM, dataloaders, criterion_coarse, criterion_
                     
                     # Fine Stage
                     # fine_landmarks_all = fine_LSTM(coarse_landmarks, labels, inputs_origin, coarse_feature, phase, size_tensor_inv)
-                    fine_landmarks_all = fine_LSTM(coarse_landmarks, labels, inputs_origin_list, coarse_feature, phase, size_tensor_inv)
+                    fine_landmarks_all = fine_LSTM(coarse_landmarks, labels, inputs_origin_tensor, coarse_feature, phase, size_tensor_inv)
 
                     # 计算 Loss (Original Logic)
                     mask_loss = (labels[:, :, 0] >= 0).float().unsqueeze(2)

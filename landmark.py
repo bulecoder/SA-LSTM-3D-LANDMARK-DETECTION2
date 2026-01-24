@@ -25,7 +25,7 @@ parser.add_argument("--use_gpu", type=int, default=0)
 parser.add_argument("--iteration", type=int, default=3)                 # LSTM的长度
 # parser.add_argument("--R1", type=int, default=5)              # 暂时没有使用到这两个参数
 # parser.add_argument("--R2", type=int, default=9)
-parser.add_argument("--epochs", type=int, default=50)          # 迭代次数
+parser.add_argument("--epochs", type=int, default=100)          # 迭代次数
 parser.add_argument("--data_enhanceNum", type=int, default=5)   # TODO:数据增强
 parser.add_argument('--lr', type=float, default=0.0001)     # 学习率
 parser.add_argument("--spacing", type=tuple, default=(0.5, 0.5, 0.5))   # npy数据的体素间距
@@ -104,7 +104,7 @@ def main():
         train_dataset_origin, 
         batch_size=config.batchSize, 
         shuffle=True,       # 必须打乱
-        num_workers=0,      # 设置为 CPU 核心数
+        num_workers=8,      # 设置为 CPU 核心数
         pin_memory=True,    # 加速 CPU -> GPU 传输
         # persistent_workers=True
     )
@@ -113,7 +113,7 @@ def main():
         val_dataset, 
         batch_size=config.batchSize, 
         shuffle=False, 
-        num_workers=0,
+        num_workers=4,
         # pin_memory=True
     )
 
