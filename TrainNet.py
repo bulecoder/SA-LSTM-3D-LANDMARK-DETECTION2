@@ -257,7 +257,7 @@ def train_model(coarse_net, fine_LSTM, dataloaders, criterion_coarse, criterion_
                 torch.save(coarse_net.state_dict(), os.path.join(save_dir, 'best_coarse.pth'))
                 torch.save(fine_LSTM.state_dict(), os.path.join(save_dir, 'best_fine_LSTM.pth'))
             
-            if (epoch + 1) % 10 == 0:       # 每10个epoch打印输出一下评价指标
+            if (epoch + 1) % 1 == 0:       # 每10个epoch打印输出一下评价指标
                 logger.info("")
                 print_detailed_results("TRAIN", c_mre_train, c_sd_train, f_mre_train, f_sd_train, sdr_train)
                 print_detailed_results("TEST ", c_mre_test, c_sd_test, f_mre_test, f_sd_test, sdr_test)

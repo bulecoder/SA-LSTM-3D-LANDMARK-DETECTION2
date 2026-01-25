@@ -160,7 +160,7 @@ class coarseNet(nn.Module):
         self.usegpu = config.use_gpu
         self.image_scale = config.image_scale
         self.u_net = MNL.U_Net3D(1, 64)
-        self.dropout = nn.Dropout3d(p=0.3)  # 30%概率丢弃特征，正则化抑制过拟合
+        self.dropout = nn.Dropout3d(p=0.5)  # 30%概率丢弃特征，正则化抑制过拟合
         self.conv3d = nn.Sequential(
             nn.Conv3d(64, config.landmarkNum, 1, 1, 0),
             nn.Sigmoid(),
@@ -238,15 +238,37 @@ class fine_LSTM(nn.Module):
 
         for i in range(0, self.iteration):
             ROIs = 0
-            if phase == 'train':    # teacher forcing，下一次 ROI 位置是基于真值+噪声，而不是上一次的预测
+            # if phase == 'train':    # teacher forcing，下一次 ROI 位置是基于真值+噪声，而不是上一次的预测
+            #     if i == 0:
+            #         ROIs = labels + torch.from_numpy(np.random.normal(loc=0.0, scale=32.0 / self.origin_image_size[2] / 3, size = labels.size())).cuda(self.usegpu).float()
+            #     elif i == 1:
+            #         ROIs = labels + torch.from_numpy(np.random.normal(loc=0.0, scale=16.0 / self.origin_image_size[2] / 3, size = labels.size())).cuda(self.usegpu).float()
+            #     else:
+            #         ROIs = labels + torch.from_numpy(np.random.normal(loc=0.0, scale=8.0 / self.origin_image_size[2] / 3, size = labels.size())).cuda(self.usegpu).float()
+            # else:
+            #     ROIs = predict
+            if phase == 'train':
+                # 1. 计算噪声比例 (保持论文的多分辨率逻辑: 32 -> 16 -> 8)
+                if i == 0:   scale_val = 32.0   # 对应论文里面的多分辨率，这里是半径
+                elif i == 1: scale_val = 16.0
+                else:        scale_val = 8.0
+                
+                # 生成噪声
+                noise = torch.from_numpy(np.random.normal(
+                    loc=0.0, 
+                    scale=scale_val / self.origin_image_size[2] / 6,        # 噪声比例设置为半径的1/6
+                    size=labels.size()
+                )).cuda(self.usegpu).float()
+
+                # 2. 确定切图中心 (ROIs)
                 if i == 0:
-                    ROIs = labels + torch.from_numpy(np.random.normal(loc=0.0, scale=32.0 / self.origin_image_size[2] / 3, size = labels.size())).cuda(self.usegpu).float()
-                elif i == 1:
-                    ROIs = labels + torch.from_numpy(np.random.normal(loc=0.0, scale=16.0 / self.origin_image_size[2] / 3, size = labels.size())).cuda(self.usegpu).float()
+                    # 第 0 步：冷启动，必须用 真值 + 噪声 (否则可能切到全黑)
+                    ROIs = labels + noise
                 else:
-                    ROIs = labels + torch.from_numpy(np.random.normal(loc=0.0, scale=8.0 / self.origin_image_size[2] / 3, size = labels.size())).cuda(self.usegpu).float()
+                    # 使用上一步的预测值 (predict) + 噪声  Student Forcing，强迫模型学会从上一步的位置修正
+                    ROIs = predict.detach() + noise
             else:
-                ROIs = predict
+                ROIs = predict  # 验证/测试阶段：始终使用上一步的预测
 
             ROIs = MyUtils.adjustment(ROIs, labels)
             # 这里加一个数值裁剪（限幅），避免ROIs越界
@@ -261,7 +283,7 @@ class fine_LSTM(nn.Module):
             # 3. 调整维度以匹配后续全连接层
             features = features_pooled.view(features_pooled.size(0), -1).unsqueeze(0)   # 严谨写法：先展平为 [B, 512]，再 unsqueeze
             global_feature = MyUtils.get_global_feature(ROIs.detach().cpu().numpy(), coarse_feature, self.landmarkNum)
-            global_feature = self.graph_attention(ROIs, global_feature)
+            global_feature = self.graph_attention(ROIs, global_feature)     # graph attention（GNN）
             features = torch.cat((features, global_feature), dim=2)
             # features = self.graph_attention(ROIs, features)
 

@@ -20,23 +20,23 @@ parser.add_argument("--batchSize", type=int, default=1)
 parser.add_argument("--landmarkNum", type=int, default=7)
 parser.add_argument("--image_scale", default=(96, 96, 96), type=tuple)  # 降采样图像尺寸
 parser.add_argument("--origin_image_size", default=(512, 512, 512), type=tuple) # 原始图像尺寸
-parser.add_argument("--crop_size", default=(64, 64, 64), type=tuple)        # 裁剪块尺寸, 32修改为64
+parser.add_argument("--crop_size", default=(96, 96, 96), type=tuple)        # 裁剪块尺寸, 32修改为64
 parser.add_argument("--use_gpu", type=int, default=0)
 parser.add_argument("--iteration", type=int, default=3)                 # LSTM的长度
 # parser.add_argument("--R1", type=int, default=5)              # 暂时没有使用到这两个参数
 # parser.add_argument("--R2", type=int, default=9)
-parser.add_argument("--epochs", type=int, default=500)          # 迭代次数
+parser.add_argument("--epochs", type=int, default=100)          # 迭代次数
 parser.add_argument("--data_enhanceNum", type=int, default=1)   # TODO:数据增强
 parser.add_argument('--lr', type=float, default=0.0001)     # 学习率
 parser.add_argument("--spacing", type=tuple, default=(0.5, 0.5, 0.5))   # npy数据的体素间距
 parser.add_argument("--stage", type=str, default="train")       # 默认为训练模式
 parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint to resume from (e.g., 'runs/exp1')") # 从哪个路径下的权重开始继续训练
 # 输入数据部分参数
-parser.add_argument('--dataRoot', type=str, default="F:/CBCT/SA-LSTM-3D-Landmark-Detection2/processed_data/")   # npy格式数据路径
+parser.add_argument('--dataRoot', type=str, default="./processed_data/")   # npy格式数据路径
 parser.add_argument("--traincsv", type=str, default='train.csv')    # 训练数据
 parser.add_argument("--testcsv", type=str, default='test.csv')      # 测试数据
 # 输出保存部分参数 
-parser.add_argument("--saveName", type=str, default='regularization')         # 修改配置以后要修改saveName来保存训练数据
+parser.add_argument("--saveName", type=str, default='Student_forcing')         # 修改配置以后要修改saveName来保存训练数据
 # 加载哪个文件夹的权重进行测试
 parser.add_argument("--testName", type=str, default="test3")    # 选择哪个配置来测试数据
 
