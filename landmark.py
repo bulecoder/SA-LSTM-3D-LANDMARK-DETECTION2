@@ -25,7 +25,7 @@ parser.add_argument("--use_gpu", type=int, default=0)
 parser.add_argument("--iteration", type=int, default=3)                 # LSTM的长度
 # parser.add_argument("--R1", type=int, default=5)              # 暂时没有使用到这两个参数
 # parser.add_argument("--R2", type=int, default=9)
-parser.add_argument("--epochs", type=int, default=100)          # 迭代次数
+parser.add_argument("--epochs", type=int, default=50)          # 迭代次数
 parser.add_argument("--data_enhanceNum", type=int, default=1)   # TODO:数据增强
 parser.add_argument('--lr', type=float, default=0.0001)     # 学习率
 parser.add_argument("--spacing", type=tuple, default=(0.5, 0.5, 0.5))   # npy数据的体素间距
@@ -33,12 +33,12 @@ parser.add_argument("--stage", type=str, default="train")       # 默认为训�
 parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint to resume from (e.g., 'runs/exp1')") # 从哪个路径下的权重开始继续训练
 # 输入数据部分参数
 parser.add_argument('--dataRoot', type=str, default="./processed_data/")   # npy格式数据路径
-parser.add_argument("--traincsv", type=str, default='train.csv')    # 训练数据
-parser.add_argument("--testcsv", type=str, default='test.csv')      # 测试数据
+parser.add_argument("--traincsv", type=str, default='train1.csv')    # 训练数据
+parser.add_argument("--testcsv", type=str, default='test1.csv')      # 测试数据
 # 输出保存部分参数 
-parser.add_argument("--saveName", type=str, default='Student_forcing')         # 修改配置以后要修改saveName来保存训练数据
+parser.add_argument("--saveName", type=str, default='test3')         # 修改配置以后要修改saveName来保存训练数据
 # 加载哪个文件夹的权重进行测试
-parser.add_argument("--testName", type=str, default="test3")    # 选择哪个配置来测试数据
+parser.add_argument("--testName", type=str, default="SmoothL1Loss_AdamW")    # 选择哪个配置来测试数据
 
 
 def main():
@@ -108,7 +108,9 @@ def main():
 
     params = list(coarseNet.parameters()) + list(fine_LSTM.parameters())
 
-    optimizer_ft = optim.Adam(params, lr=config.lr, weight_decay=1e-4)  # 权重衰减，如果依然过拟合，尝试加重到1e-3
+    # optimizer_ft = optim.Adam(params, lr=config.lr, weight_decay=1e-4)  # 权重衰减，如果依然过拟合，尝试加重到1e-3
+    optimizer_ft = optim.AdamW(params, lr=config.lr, weight_decay=5e-4)
+
 
     TrainNet.train_model(coarseNet, fine_LSTM, dataloaders, criterion_coarse, criterion_fine,
                          optimizer_ft, config)

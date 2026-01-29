@@ -245,82 +245,6 @@ def getcropedInputs_related(ROIs, labels, inputs_origin, useGPU, index, config):
     # ~ print (cropedDICOMs.size())
     return cropedDICOMs
 
-def getcropedInputs(ROIs, inputs_origin, cropSize, useGPU):
-    # ROIs: (1, N, 3) 绝对像素坐标 (已在 MyDataLoader 中钳位)
-    # inputs_origin: (B, C, D, H, W)
-    
-    landmarks = ROIs
-    landmarkNum = landmarks.shape[1]
-    b, c, l, h, w = inputs_origin.size()
-
-    # cropSize 传入的是直径 (96)，计算半径
-    radius = int(cropSize / 2)
-    
-    # 🔥 关键修改：直接使用像素坐标，移除 * (h-1) 的缩放
-    X = landmarks[:, :, 0]
-    Y = landmarks[:, :, 1]
-    Z = landmarks[:, :, 2]
-    
-    # 转整型
-    X = np.round(X).astype("int")
-    Y = np.round(Y).astype("int")
-    Z = np.round(Z).astype("int")
-    
-    cropedDICOMs = []
-    
-    for landmarkId in range(landmarkNum):
-        # 注意：这里假设输入的 ROIs 顺序是 (X, Y, Z) 对应 (H, W, D) 还是 (D, H, W)?
-        # 根据之前的报错 "allocate ... uy - w"，以及 MyDataLoader 里的 reshape
-        # 我们假设输入顺序已经适配了
-        
-        # MyDataLoader 传入的是 (D, H, W) 对应的坐标
-        # 原代码看起来 X 对应 h, Y 对应 w, Z 对应 l
-        z, x, y = Z[0][landmarkId], X[0][landmarkId], Y[0][landmarkId]
-        
-        lz, uz = z - radius, z + radius
-        lx, ux = x - radius, x + radius
-        ly, uy = y - radius, y + radius
-        
-        # 计算有效区域 (Clamp)
-        lzz, uzz = max(lz, 0), min(uz, l)
-        lxx, uxx = max(lx, 0), min(ux, h)
-        lyy, uyy = max(ly, 0), min(uy, w)
-
-        # 切取有效部分
-        cropedDICOM = inputs_origin[:, :, lzz: uzz, lxx: uxx, lyy: uyy].clone()
-        
-        # Padding 逻辑 (处理边缘)
-        # 如果 MyDataLoader 已经做了 Safe Clamp，这里其实不会触发 Padding
-        # 但保留以防万一
-        
-        # Z轴 padding
-        if lz < 0:
-            pad = torch.zeros(b, c, 0 - lz, cropedDICOM.size(3), cropedDICOM.size(4)).to(inputs_origin.device)
-            cropedDICOM = torch.cat((pad, cropedDICOM), 2)
-        if uz > l:
-            pad = torch.zeros(b, c, uz - l, cropedDICOM.size(3), cropedDICOM.size(4)).to(inputs_origin.device)
-            cropedDICOM = torch.cat((cropedDICOM, pad), 2)
-            
-        # X轴 padding
-        if lx < 0:
-            pad = torch.zeros(b, c, cropedDICOM.size(2), 0 - lx, cropedDICOM.size(4)).to(inputs_origin.device)
-            cropedDICOM = torch.cat((pad, cropedDICOM), 3)
-        if ux > h:
-            pad = torch.zeros(b, c, cropedDICOM.size(2), ux - h, cropedDICOM.size(4)).to(inputs_origin.device)
-            cropedDICOM = torch.cat((cropedDICOM, pad), 3)
-            
-        # Y轴 padding
-        if ly < 0:
-            pad = torch.zeros(b, c, cropedDICOM.size(2), cropedDICOM.size(3), 0 - ly).to(inputs_origin.device)
-            cropedDICOM = torch.cat((pad, cropedDICOM), 4)
-        if uy > w:
-            pad = torch.zeros(b, c, cropedDICOM.size(2), cropedDICOM.size(3), uy - w).to(inputs_origin.device)
-            cropedDICOM = torch.cat((cropedDICOM, pad), 4)
-
-        cropedDICOMs.append(cropedDICOM)
-
-    return cropedDICOMs
-
 def get_local_patches(ROIs, cropedtems, base_coordinate, usegpu):
     local_coordinate = []
     local_patches = []
@@ -543,7 +467,8 @@ def get_logger(filename, verbosity=1, name=None):
     """
     level_dict = {0: logging.DEBUG, 1: logging.INFO, 2: logging.WARNING}
     formatter = logging.Formatter(
-        "[%(asctime)s][%(filename)s][line:%(lineno)d][%(levelname)s] %(message)s"
+        # "[%(asctime)s][%(filename)s][line:%(lineno)d][%(levelname)s] %(message)s"  # 日志时间、脚本名、行数、消息
+        "[%(levelname)s] %(message)s"           # 只保留级别+消息
     )
     
     logger = logging.getLogger(name)

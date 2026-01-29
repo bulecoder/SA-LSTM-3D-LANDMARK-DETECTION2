@@ -205,7 +205,7 @@ class fine_LSTM(nn.Module):
         # (576, 768, 768)
 
         self.size_tensor = torch.tensor([1 / (l - 1), 1 / (h - 1), 1 / (w - 1)]).cuda(self.usegpu)
-
+        # 这里的输入维度是 512 (Local) + 64 (Global) = 576
         self.decoders_offset_x = nn.Conv1d(self.landmarkNum, self.landmarkNum, 512 + 64, 1, 0, groups=self.landmarkNum)
         self.decoders_offset_y = nn.Conv1d(self.landmarkNum, self.landmarkNum, 512 + 64, 1, 0, groups=self.landmarkNum)
         self.decoders_offset_z = nn.Conv1d(self.landmarkNum, self.landmarkNum, 512 + 64, 1, 0, groups=self.landmarkNum)
@@ -219,6 +219,7 @@ class fine_LSTM(nn.Module):
         )
         self.attention_gate_head = nn.Conv1d(self.landmarkNum, self.landmarkNum, 256, 1, 0, groups=self.landmarkNum)
         self.graph_attention = MNL.graph_attention(64, self.usegpu)
+        # self.graph_attention = MNL.graph_attention(512 + 64, self.usegpu)   # 将全局特征和局部特征进行拼接后，一起送入GNN进行交互
 
     def forward(self, coarse_landmarks, labels, inputs_origin, coarse_feature, phase, size_tensor_inv):
 
@@ -282,7 +283,14 @@ class fine_LSTM(nn.Module):
             features_pooled = torch.nn.functional.adaptive_avg_pool3d(features_raw, (1, 1, 1))  # 无论 crop_size 多大，这里输出形状永远是 [B, 512, 1, 1, 1]
             # 3. 调整维度以匹配后续全连接层
             features = features_pooled.view(features_pooled.size(0), -1).unsqueeze(0)   # 严谨写法：先展平为 [B, 512]，再 unsqueeze
-            global_feature = MyUtils.get_global_feature(ROIs.detach().cpu().numpy(), coarse_feature, self.landmarkNum)
+
+            global_feature = MyUtils.get_global_feature(ROIs.detach().cpu().numpy(), coarse_feature, self.landmarkNum) # 获取全局特征（64维度）
+
+            # 先拼接全局特征+局部特征，再GNN 的版本，测试后发现变化不大
+            # features = torch.cat((features, global_feature), dim=2)     # 拼接: 512 + 64 = 576 维
+            # features = self.graph_attention(ROIs, features)
+
+            # 原始版本：先对全局特征GNN，再拼接局部特征
             global_feature = self.graph_attention(ROIs, global_feature)     # graph attention（GNN）
             features = torch.cat((features, global_feature), dim=2)
             # features = self.graph_attention(ROIs, features)

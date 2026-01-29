@@ -49,7 +49,7 @@ def train_model(coarse_net, fine_LSTM, dataloaders, criterion_coarse, criterion_
     for i in range(gw): global_coordinate[:, :, i, 2] *= i
     global_coordinate = global_coordinate.cuda(config.use_gpu) * torch.tensor([1 / (gl - 1), 1 / (gh - 1), 1 / (gw - 1)]).cuda(config.use_gpu)
 
-    # --- 🔥 断点加载逻辑 (Resume) ---
+    # --- 断点加载逻辑 (Resume) ---
     if config.resume:
         checkpoint_path = config.resume
         if os.path.isdir(checkpoint_path):   # 如果传入的是文件夹 (例如: runs/test4)，自动拼接文件名
@@ -83,11 +83,6 @@ def train_model(coarse_net, fine_LSTM, dataloaders, criterion_coarse, criterion_
             if phase == 'train':
                 coarse_net.train(True) # 开启训练模式
                 fine_LSTM.train(True)
-                # 临时测试一下
-                if epoch == 0 and i == 0: # 只在第0轮第0个batch打印一次，避免刷屏
-                    print(f"DEBUG: coarse_net.training = {coarse_net.training}")
-                    # 如果你刚才加了 self.dropout，可以具体打印它
-                    # print(f"DEBUG: dropout.training = {coarse_net.dropout.training}")
             else:
                 if epoch % test_epoch != 0: continue
                 coarse_net.train(False)    # 开启测试模式
@@ -144,10 +139,19 @@ def train_model(coarse_net, fine_LSTM, dataloaders, criterion_coarse, criterion_
                     mask_loss = (labels[:, :, 0] >= 0).float().unsqueeze(2)
                     # 取最后一次迭代的结果来计算损失
                     fine_pred_last = fine_landmarks_all[-1].unsqueeze(0)
-                    loss = (torch.abs(fine_pred_last - labels) * mask_loss).sum() / (mask_loss.sum() + 1e-6)
 
-                    # Coarse Loss: 传入 List 类型的 coarse_heatmap
-                    loss += criterion_coarse(coarse_heatmap, global_coordinate, labels, phase)
+                    # loss = (torch.abs(fine_pred_last - labels) * mask_loss).sum() / (mask_loss.sum() + 1e-6)
+                    # # Coarse Loss: 传入 List 类型的 coarse_heatmap
+                    # loss += criterion_coarse(coarse_heatmap, global_coordinate, labels, phase)
+
+                    # Fine Loss: 使用 SmoothL1Loss
+                    smooth_l1_loss = torch.nn.SmoothL1Loss(reduction='none')    # 注意: reduction='none' 配合 mask 手动求和
+                    loss_fine_raw = smooth_l1_loss(fine_pred_last, labels)
+                    loss_fine = (loss_fine_raw * mask_loss).sum() / (mask_loss.sum() + 1e-6)
+                    # Coarse Loss: 保持原样 (Heatmap Loss)
+                    loss_coarse = criterion_coarse(coarse_heatmap, global_coordinate, labels, phase)
+                    # Total Loss: 加权求和 (FineNet 权重翻倍)
+                    loss = 2.0 * loss_fine + 1.0 * loss_coarse      # 目的: 告诉模型 "Coarse 差不多就行，但 Fine 必须准"
 
                     # 反向传播
                     if phase == 'train' and config.stage == 'train':
