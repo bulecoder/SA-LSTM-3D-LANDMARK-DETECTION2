@@ -143,9 +143,9 @@ class LandmarksDataset(Dataset):
     def __getitem__(self, idx):
         filename = self.landmarks_frame.iloc[idx, 0]
         
-        # # 🔍 打印进度 (每 10 个样本打印一次，防止刷屏)
-        # if idx % 10 == 0:
-        #     print(f"   Loading sample [{idx}/{len(self)}]: {filename}")
+        # 🔍 打印进度 (每 10 个样本打印一次，防止刷屏)
+        if idx % 10 == 0:
+            print(f"   Loading sample [{idx}/{len(self)}]: {filename}")
         
         # img_name_coarse = os.path.join(self.root_dir, "96_" + filename)
         img_name_fine = os.path.join(self.root_dir, filename)
